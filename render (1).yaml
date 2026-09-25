@@ -1,0 +1,568 @@
+# Blueprint de Render para SentinelOps (seginfo-toolkit).
+# Crea de una vez: la base Postgres, Redis (Key Value), los 11 microservicios
+# backend y el frontend. Todo en plan Free, region Oregon.
+
+envVarGroups:
+  - name: sentinelops-shared
+    envVars:
+      - key: ENVIRONMENT
+        value: "production"
+      - key: LOG_LEVEL
+        value: "INFO"
+      - key: PORT
+        value: "8000"
+      - key: JWT_ALGORITHM
+        value: "HS256"
+      - key: ACCESS_TOKEN_EXPIRE_MINUTES
+        value: "15"
+      - key: REFRESH_TOKEN_EXPIRE_DAYS
+        value: "7"
+      - key: MFA_ISSUER_NAME
+        value: "SentinelOps"
+      # Secretos: Render genera un valor aleatorio y lo comparte entre todos los servicios.
+      - key: JWT_SECRET_KEY
+        generateValue: true
+      - key: ENCRYPTION_KEY
+        generateValue: true
+      # Cambiar por el link real del frontend cuando este creado (Env Groups en el dashboard).
+      - key: FRONTEND_URL
+        value: https://CAMBIAR.onrender.com
+      - key: CORS_ALLOWED_ORIGINS
+        value: https://CAMBIAR.onrender.com
+
+databases:
+  - name: sentinelops-db
+    databaseName: sentinelops
+    user: sentinelops
+    plan: free
+    region: oregon
+    ipAllowList: []
+
+services:
+  - type: keyvalue
+    name: sentinelops-redis
+    plan: free
+    region: oregon
+    ipAllowList: []
+
+  - type: web
+    name: auth-service
+    runtime: docker
+    plan: free
+    region: oregon
+    dockerContext: .
+    dockerfilePath: ./backend/services/auth-service/Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - fromGroup: sentinelops-shared
+      - key: POSTGRES_HOST
+        fromDatabase:
+          name: sentinelops-db
+          property: host
+      - key: POSTGRES_PORT
+        fromDatabase:
+          name: sentinelops-db
+          property: port
+      - key: POSTGRES_DB
+        fromDatabase:
+          name: sentinelops-db
+          property: database
+      - key: POSTGRES_USER
+        fromDatabase:
+          name: sentinelops-db
+          property: user
+      - key: POSTGRES_PASSWORD
+        fromDatabase:
+          name: sentinelops-db
+          property: password
+      - key: REDIS_HOST
+        fromService:
+          type: keyvalue
+          name: sentinelops-redis
+          property: host
+      - key: REDIS_PORT
+        fromService:
+          type: keyvalue
+          name: sentinelops-redis
+          property: port
+
+  - type: web
+    name: asset-service
+    runtime: docker
+    plan: free
+    region: oregon
+    dockerContext: .
+    dockerfilePath: ./backend/services/asset-service/Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - fromGroup: sentinelops-shared
+      - key: POSTGRES_HOST
+        fromDatabase:
+          name: sentinelops-db
+          property: host
+      - key: POSTGRES_PORT
+        fromDatabase:
+          name: sentinelops-db
+          property: port
+      - key: POSTGRES_DB
+        fromDatabase:
+          name: sentinelops-db
+          property: database
+      - key: POSTGRES_USER
+        fromDatabase:
+          name: sentinelops-db
+          property: user
+      - key: POSTGRES_PASSWORD
+        fromDatabase:
+          name: sentinelops-db
+          property: password
+      - key: REDIS_HOST
+        fromService:
+          type: keyvalue
+          name: sentinelops-redis
+          property: host
+      - key: REDIS_PORT
+        fromService:
+          type: keyvalue
+          name: sentinelops-redis
+          property: port
+
+  - type: web
+    name: scan-service
+    runtime: docker
+    plan: free
+    region: oregon
+    dockerContext: .
+    dockerfilePath: ./backend/services/scan-service/Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - fromGroup: sentinelops-shared
+      - key: POSTGRES_HOST
+        fromDatabase:
+          name: sentinelops-db
+          property: host
+      - key: POSTGRES_PORT
+        fromDatabase:
+          name: sentinelops-db
+          property: port
+      - key: POSTGRES_DB
+        fromDatabase:
+          name: sentinelops-db
+          property: database
+      - key: POSTGRES_USER
+        fromDatabase:
+          name: sentinelops-db
+          property: user
+      - key: POSTGRES_PASSWORD
+        fromDatabase:
+          name: sentinelops-db
+          property: password
+      - key: REDIS_HOST
+        fromService:
+          type: keyvalue
+          name: sentinelops-redis
+          property: host
+      - key: REDIS_PORT
+        fromService:
+          type: keyvalue
+          name: sentinelops-redis
+          property: port
+      - key: VULN_SERVICE_URL
+        value: http://vuln-service:8000
+      - key: SIEM_SERVICE_URL
+        value: http://siem-service:8000
+
+  - type: web
+    name: vuln-service
+    runtime: docker
+    plan: free
+    region: oregon
+    dockerContext: .
+    dockerfilePath: ./backend/services/vuln-service/Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - fromGroup: sentinelops-shared
+      - key: POSTGRES_HOST
+        fromDatabase:
+          name: sentinelops-db
+          property: host
+      - key: POSTGRES_PORT
+        fromDatabase:
+          name: sentinelops-db
+          property: port
+      - key: POSTGRES_DB
+        fromDatabase:
+          name: sentinelops-db
+          property: database
+      - key: POSTGRES_USER
+        fromDatabase:
+          name: sentinelops-db
+          property: user
+      - key: POSTGRES_PASSWORD
+        fromDatabase:
+          name: sentinelops-db
+          property: password
+      - key: REDIS_HOST
+        fromService:
+          type: keyvalue
+          name: sentinelops-redis
+          property: host
+      - key: REDIS_PORT
+        fromService:
+          type: keyvalue
+          name: sentinelops-redis
+          property: port
+      - key: ASSET_SERVICE_URL
+        value: http://asset-service:8000
+
+  - type: web
+    name: siem-service
+    runtime: docker
+    plan: free
+    region: oregon
+    dockerContext: .
+    dockerfilePath: ./backend/services/siem-service/Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - fromGroup: sentinelops-shared
+      - key: POSTGRES_HOST
+        fromDatabase:
+          name: sentinelops-db
+          property: host
+      - key: POSTGRES_PORT
+        fromDatabase:
+          name: sentinelops-db
+          property: port
+      - key: POSTGRES_DB
+        fromDatabase:
+          name: sentinelops-db
+          property: database
+      - key: POSTGRES_USER
+        fromDatabase:
+          name: sentinelops-db
+          property: user
+      - key: POSTGRES_PASSWORD
+        fromDatabase:
+          name: sentinelops-db
+          property: password
+      - key: REDIS_HOST
+        fromService:
+          type: keyvalue
+          name: sentinelops-redis
+          property: host
+      - key: REDIS_PORT
+        fromService:
+          type: keyvalue
+          name: sentinelops-redis
+          property: port
+      - key: SOAR_SERVICE_URL
+        value: http://soar-service:8000
+
+  - type: web
+    name: soar-service
+    runtime: docker
+    plan: free
+    region: oregon
+    dockerContext: .
+    dockerfilePath: ./backend/services/soar-service/Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - fromGroup: sentinelops-shared
+      - key: POSTGRES_HOST
+        fromDatabase:
+          name: sentinelops-db
+          property: host
+      - key: POSTGRES_PORT
+        fromDatabase:
+          name: sentinelops-db
+          property: port
+      - key: POSTGRES_DB
+        fromDatabase:
+          name: sentinelops-db
+          property: database
+      - key: POSTGRES_USER
+        fromDatabase:
+          name: sentinelops-db
+          property: user
+      - key: POSTGRES_PASSWORD
+        fromDatabase:
+          name: sentinelops-db
+          property: password
+      - key: REDIS_HOST
+        fromService:
+          type: keyvalue
+          name: sentinelops-redis
+          property: host
+      - key: REDIS_PORT
+        fromService:
+          type: keyvalue
+          name: sentinelops-redis
+          property: port
+      - key: CASE_SERVICE_URL
+        value: http://case-service:8000
+      - key: INTEGRATION_SERVICE_URL
+        value: http://integration-service:8000
+      - key: NOTIFICATION_SERVICE_URL
+        value: http://notification-service:8000
+      - key: SOAR_DRY_RUN
+        value: "true"
+
+  - type: web
+    name: case-service
+    runtime: docker
+    plan: free
+    region: oregon
+    dockerContext: .
+    dockerfilePath: ./backend/services/case-service/Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - fromGroup: sentinelops-shared
+      - key: POSTGRES_HOST
+        fromDatabase:
+          name: sentinelops-db
+          property: host
+      - key: POSTGRES_PORT
+        fromDatabase:
+          name: sentinelops-db
+          property: port
+      - key: POSTGRES_DB
+        fromDatabase:
+          name: sentinelops-db
+          property: database
+      - key: POSTGRES_USER
+        fromDatabase:
+          name: sentinelops-db
+          property: user
+      - key: POSTGRES_PASSWORD
+        fromDatabase:
+          name: sentinelops-db
+          property: password
+      - key: REDIS_HOST
+        fromService:
+          type: keyvalue
+          name: sentinelops-redis
+          property: host
+      - key: REDIS_PORT
+        fromService:
+          type: keyvalue
+          name: sentinelops-redis
+          property: port
+      - key: SOAR_SERVICE_URL
+        value: http://soar-service:8000
+      - key: AUTH_SERVICE_URL
+        value: http://auth-service:8000
+
+  - type: web
+    name: purple-service
+    runtime: docker
+    plan: free
+    region: oregon
+    dockerContext: .
+    dockerfilePath: ./backend/services/purple-service/Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - fromGroup: sentinelops-shared
+      - key: POSTGRES_HOST
+        fromDatabase:
+          name: sentinelops-db
+          property: host
+      - key: POSTGRES_PORT
+        fromDatabase:
+          name: sentinelops-db
+          property: port
+      - key: POSTGRES_DB
+        fromDatabase:
+          name: sentinelops-db
+          property: database
+      - key: POSTGRES_USER
+        fromDatabase:
+          name: sentinelops-db
+          property: user
+      - key: POSTGRES_PASSWORD
+        fromDatabase:
+          name: sentinelops-db
+          property: password
+      - key: REDIS_HOST
+        fromService:
+          type: keyvalue
+          name: sentinelops-redis
+          property: host
+      - key: REDIS_PORT
+        fromService:
+          type: keyvalue
+          name: sentinelops-redis
+          property: port
+      - key: SIEM_SERVICE_URL
+        value: http://siem-service:8000
+
+  - type: web
+    name: report-service
+    runtime: docker
+    plan: free
+    region: oregon
+    dockerContext: .
+    dockerfilePath: ./backend/services/report-service/Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - fromGroup: sentinelops-shared
+      - key: POSTGRES_HOST
+        fromDatabase:
+          name: sentinelops-db
+          property: host
+      - key: POSTGRES_PORT
+        fromDatabase:
+          name: sentinelops-db
+          property: port
+      - key: POSTGRES_DB
+        fromDatabase:
+          name: sentinelops-db
+          property: database
+      - key: POSTGRES_USER
+        fromDatabase:
+          name: sentinelops-db
+          property: user
+      - key: POSTGRES_PASSWORD
+        fromDatabase:
+          name: sentinelops-db
+          property: password
+      - key: REDIS_HOST
+        fromService:
+          type: keyvalue
+          name: sentinelops-redis
+          property: host
+      - key: REDIS_PORT
+        fromService:
+          type: keyvalue
+          name: sentinelops-redis
+          property: port
+      - key: VULN_SERVICE_URL
+        value: http://vuln-service:8000
+      - key: SIEM_SERVICE_URL
+        value: http://siem-service:8000
+      - key: CASE_SERVICE_URL
+        value: http://case-service:8000
+      - key: PURPLE_SERVICE_URL
+        value: http://purple-service:8000
+      - key: NOTIFICATION_SERVICE_URL
+        value: http://notification-service:8000
+
+  - type: web
+    name: notification-service
+    runtime: docker
+    plan: free
+    region: oregon
+    dockerContext: .
+    dockerfilePath: ./backend/services/notification-service/Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - fromGroup: sentinelops-shared
+      - key: POSTGRES_HOST
+        fromDatabase:
+          name: sentinelops-db
+          property: host
+      - key: POSTGRES_PORT
+        fromDatabase:
+          name: sentinelops-db
+          property: port
+      - key: POSTGRES_DB
+        fromDatabase:
+          name: sentinelops-db
+          property: database
+      - key: POSTGRES_USER
+        fromDatabase:
+          name: sentinelops-db
+          property: user
+      - key: POSTGRES_PASSWORD
+        fromDatabase:
+          name: sentinelops-db
+          property: password
+      - key: REDIS_HOST
+        fromService:
+          type: keyvalue
+          name: sentinelops-redis
+          property: host
+      - key: REDIS_PORT
+        fromService:
+          type: keyvalue
+          name: sentinelops-redis
+          property: port
+      - key: NOTIFICATION_DRY_RUN
+        value: "true"
+
+  - type: web
+    name: integration-service
+    runtime: docker
+    plan: free
+    region: oregon
+    dockerContext: .
+    dockerfilePath: ./backend/services/integration-service/Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - fromGroup: sentinelops-shared
+      - key: POSTGRES_HOST
+        fromDatabase:
+          name: sentinelops-db
+          property: host
+      - key: POSTGRES_PORT
+        fromDatabase:
+          name: sentinelops-db
+          property: port
+      - key: POSTGRES_DB
+        fromDatabase:
+          name: sentinelops-db
+          property: database
+      - key: POSTGRES_USER
+        fromDatabase:
+          name: sentinelops-db
+          property: user
+      - key: POSTGRES_PASSWORD
+        fromDatabase:
+          name: sentinelops-db
+          property: password
+      - key: REDIS_HOST
+        fromService:
+          type: keyvalue
+          name: sentinelops-redis
+          property: host
+      - key: REDIS_PORT
+        fromService:
+          type: keyvalue
+          name: sentinelops-redis
+          property: port
+      - key: INTEGRATION_DRY_RUN
+        value: "true"
+
+  - type: web
+    name: sentinelops-frontend
+    runtime: static
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: ./dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      # Completar con los links publicos (https://...onrender.com) de cada servicio.
+      - key: VITE_API_BASE_URL
+        sync: false
+      - key: VITE_ASSET_API_BASE_URL
+        sync: false
+      - key: VITE_SCAN_API_BASE_URL
+        sync: false
+      - key: VITE_VULN_API_BASE_URL
+        sync: false
+      - key: VITE_SIEM_API_BASE_URL
+        sync: false
+      - key: VITE_SOAR_API_BASE_URL
+        sync: false
+      - key: VITE_CASE_API_BASE_URL
+        sync: false
+      - key: VITE_PURPLE_API_BASE_URL
+        sync: false
+      - key: VITE_REPORT_API_BASE_URL
+        sync: false
+      - key: VITE_NOTIFICATION_API_BASE_URL
+        sync: false
+      - key: VITE_INTEGRATION_API_BASE_URL
+        sync: false
