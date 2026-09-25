@@ -24,11 +24,11 @@ envVarGroups:
         generateValue: true
       - key: ENCRYPTION_KEY
         generateValue: true
-      # Cambiar por el link real del frontend cuando este creado (Env Groups en el dashboard).
+      # Link publico del frontend (para CORS).
       - key: FRONTEND_URL
-        value: https://CAMBIAR.onrender.com
+        value: https://sentinelops-frontend-yk43.onrender.com
       - key: CORS_ALLOWED_ORIGINS
-        value: https://CAMBIAR.onrender.com
+        value: https://sentinelops-frontend-yk43.onrender.com
 
 databases:
   - name: sentinelops-db
@@ -168,9 +168,9 @@ services:
           name: sentinelops-redis
           property: port
       - key: VULN_SERVICE_URL
-        value: http://vuln-service:8000
+        value: https://vuln-service.onrender.com
       - key: SIEM_SERVICE_URL
-        value: http://siem-service:8000
+        value: https://siem-service.onrender.com
 
   - type: web
     name: vuln-service
@@ -213,7 +213,7 @@ services:
           name: sentinelops-redis
           property: port
       - key: ASSET_SERVICE_URL
-        value: http://asset-service:8000
+        value: https://asset-service-jfpp.onrender.com
 
   - type: web
     name: siem-service
@@ -256,7 +256,7 @@ services:
           name: sentinelops-redis
           property: port
       - key: SOAR_SERVICE_URL
-        value: http://soar-service:8000
+        value: https://soar-service.onrender.com
 
   - type: web
     name: soar-service
@@ -299,11 +299,11 @@ services:
           name: sentinelops-redis
           property: port
       - key: CASE_SERVICE_URL
-        value: http://case-service:8000
+        value: https://case-service.onrender.com
       - key: INTEGRATION_SERVICE_URL
-        value: http://integration-service:8000
+        value: https://integration-service-vmm8.onrender.com
       - key: NOTIFICATION_SERVICE_URL
-        value: http://notification-service:8000
+        value: https://notification-service-x1ui.onrender.com
       - key: SOAR_DRY_RUN
         value: "true"
 
@@ -348,9 +348,9 @@ services:
           name: sentinelops-redis
           property: port
       - key: SOAR_SERVICE_URL
-        value: http://soar-service:8000
+        value: https://soar-service.onrender.com
       - key: AUTH_SERVICE_URL
-        value: http://auth-service:8000
+        value: https://auth-service-yc30.onrender.com
 
   - type: web
     name: purple-service
@@ -393,7 +393,7 @@ services:
           name: sentinelops-redis
           property: port
       - key: SIEM_SERVICE_URL
-        value: http://siem-service:8000
+        value: https://siem-service.onrender.com
 
   - type: web
     name: report-service
@@ -436,15 +436,15 @@ services:
           name: sentinelops-redis
           property: port
       - key: VULN_SERVICE_URL
-        value: http://vuln-service:8000
+        value: https://vuln-service.onrender.com
       - key: SIEM_SERVICE_URL
-        value: http://siem-service:8000
+        value: https://siem-service.onrender.com
       - key: CASE_SERVICE_URL
-        value: http://case-service:8000
+        value: https://case-service.onrender.com
       - key: PURPLE_SERVICE_URL
-        value: http://purple-service:8000
+        value: https://purple-service.onrender.com
       - key: NOTIFICATION_SERVICE_URL
-        value: http://notification-service:8000
+        value: https://notification-service-x1ui.onrender.com
 
   - type: web
     name: notification-service
@@ -543,26 +543,26 @@ services:
         source: /*
         destination: /index.html
     envVars:
-      # Completar con los links publicos (https://...onrender.com) de cada servicio.
+      # Links publicos de cada servicio (el plan Free no tiene red interna).
       - key: VITE_API_BASE_URL
-        sync: false
+        value: https://auth-service-yc30.onrender.com
       - key: VITE_ASSET_API_BASE_URL
-        sync: false
+        value: https://asset-service-jfpp.onrender.com
       - key: VITE_SCAN_API_BASE_URL
-        sync: false
+        value: https://scan-service-q6lo.onrender.com
       - key: VITE_VULN_API_BASE_URL
-        sync: false
+        value: https://vuln-service.onrender.com
       - key: VITE_SIEM_API_BASE_URL
-        sync: false
+        value: https://siem-service.onrender.com
       - key: VITE_SOAR_API_BASE_URL
-        sync: false
+        value: https://soar-service.onrender.com
       - key: VITE_CASE_API_BASE_URL
-        sync: false
+        value: https://case-service.onrender.com
       - key: VITE_PURPLE_API_BASE_URL
-        sync: false
+        value: https://purple-service.onrender.com
       - key: VITE_REPORT_API_BASE_URL
-        sync: false
+        value: https://report-service-pga3.onrender.com
       - key: VITE_NOTIFICATION_API_BASE_URL
-        sync: false
+        value: https://notification-service-x1ui.onrender.com
       - key: VITE_INTEGRATION_API_BASE_URL
-        sync: false
+        value: https://integration-service-vmm8.onrender.com
