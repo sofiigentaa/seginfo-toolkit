@@ -49,6 +49,26 @@ def is_valid_status_transition(old_status, new_status) -> bool:
     return new_value in CASE_STATUS_TRANSITIONS.get(old_value, set())
 
 
+def resolved_at_for_transition(new_status, current_resolved_at, now: datetime):
+    """Regla de negocio pura (sin DB, testeable) que decide que valor debe
+    tener resolved_at despues de una transicion de status via PATCH
+    /cases/{case_id}.
+
+    Bug real encontrado: update_case seteaba resolved_at cuando el caso
+    pasaba a resolved/closed, pero nunca lo limpiaba cuando el caso se
+    REABRIA (resolved/closed -> in_progress/open, ver
+    CASE_STATUS_TRANSITIONS). Un caso reabierto quedaba con un
+    resolved_at viejo -- cualquier metrica de MTTR/tiempo-de-resolucion
+    que lo use (ej. report-service, que ya consume /cases) mostraria un
+    caso todavia activo como si ya estuviese resuelto desde hace tiempo."""
+    new_value = new_status.value if hasattr(new_status, "value") else new_status
+    if new_value in (CaseStatus.resolved.value, CaseStatus.closed.value):
+        return current_resolved_at or now
+    if new_value in (CaseStatus.open.value, CaseStatus.in_progress.value):
+        return None
+    return current_resolved_at
+
+
 async def _add_timeline_entry(db: AsyncSession, case_id: str, actor: str, action: str, notes: str = "") -> None:
     db.add(CaseTimelineEntry(case_id=case_id, actor=actor, action=action, notes=notes))
     await db.flush()
@@ -96,8 +116,7 @@ async def update_case(db: AsyncSession, case: Case, payload, actor: str) -> Case
     for field, value in changes.items():
         setattr(case, field, value)
     if "status" in changes and changes["status"] != old_status:
-        if changes["status"] in (CaseStatus.resolved, CaseStatus.closed) and case.resolved_at is None:
-            case.resolved_at = _now()
+        case.resolved_at = resolved_at_for_transition(changes["status"], case.resolved_at, _now())
         await _add_timeline_entry(db, case.id, actor, "case.status_changed", f"{old_status.value} -> {changes['status'].value}")
     if changes:
         await _add_timeline_entry(db, case.id, actor, "case.updated", ", ".join(changes.keys()))

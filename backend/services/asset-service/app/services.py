@@ -50,6 +50,14 @@ async def create_asset(db: AsyncSession, payload, organization_id: str) -> Asset
     return asset
 
 
+# Mismo criterio de rol que exige el DELETE de mas abajo (deactivate_asset):
+# admin/soc_manager, sin analyst. PATCH con is_active logra lo mismo que un
+# DELETE (desactivar un activo) o lo revierte (reactivarlo), asi que tiene
+# que quedar sujeto a la misma restriccion de rol -- ver app/main.py::update_asset.
+def can_set_active_state(role: str | None) -> bool:
+    return role in ("admin", "soc_manager")
+
+
 async def update_asset(db: AsyncSession, asset: Asset, payload) -> Asset:
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(asset, field, value)

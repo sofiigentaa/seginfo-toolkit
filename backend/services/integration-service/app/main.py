@@ -7,7 +7,7 @@ para llamadas servicio-a-servicio desde soar-service dentro de la red de
 docker-compose, mismo patron que el /internal/rule-tags de siem-service) y
 endpoints de administracion de conectores que si requieren rol admin."""
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Depends, status
+from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from prometheus_client import Counter, make_asgi_app
 from sqlalchemy.ext.asyncio import AsyncSession

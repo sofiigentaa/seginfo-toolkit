@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { siemApi } from "../services/api";
-import type { AlertOut, SigmaRuleOut } from "../types";
+import { siemApi, threatIntelApi } from "../services/api";
+import type { AlertOut, SigmaRuleOut, ThreatIntelHit, IpReputationOut } from "../types";
 import PageHeader from "../components/PageHeader";
 import { SeverityBadge, StatusBadge } from "../components/Badge";
 import { connectionErrorDetail } from "../utils/errors";
@@ -20,6 +20,44 @@ const FIELD_OPTIONS = [
   { value: "sentinelops.source_type", label: "Origen (scanner/tipo de log)" },
   { value: "sentinelops.severity", label: "Severidad reportada" },
 ];
+
+// --- Threat Intel (AbuseIPDB/MISP, via threatintel-service) -----------
+
+function ThreatIntelResult({ result }: { result: IpReputationOut }) {
+  if (result.is_malicious === null) {
+    return (
+      <p className="empty-hint">
+        No se pudo chequear {result.ip} contra ninguna fuente (revisa ABUSEIPDB_API_KEY / MISP_URL en el servidor).
+      </p>
+    );
+  }
+  if (!result.is_malicious) {
+    return (
+      <p className="empty-hint">
+        {result.ip}: sin reportes de reputacion negativa ({result.source}
+        {result.cached ? ", cache" : ""}).
+      </p>
+    );
+  }
+  return (
+    <p className="error-text">
+      IP maliciosa conocida: {result.ip} ({result.source}, score {result.score ?? "?"})
+      {result.categories.length > 0 && <> -- {result.categories.join(", ")}</>}
+    </p>
+  );
+}
+
+function ThreatIntelBadge({ threatIntel }: { threatIntel?: Record<string, ThreatIntelHit> }) {
+  const entries = Object.entries(threatIntel ?? {});
+  if (entries.length === 0) {
+    return <span className="empty-hint">--</span>;
+  }
+  return (
+    <span className="badge badge-critical">
+      IP maliciosa conocida: {entries.map(([ip, hit]) => `${ip} (${hit.source}, score ${hit.score ?? "?"})`).join("; ")}
+    </span>
+  );
+}
 
 type ConditionRow = { field: string; value: string };
 
@@ -55,6 +93,9 @@ export default function Siem() {
   const [ruleFormError, setRuleFormError] = useState<string | null>(null);
   const [ruleActionError, setRuleActionError] = useState<unknown>(null);
   const [alertActionError, setAlertActionError] = useState<unknown>(null);
+  const [seedDefaultsError, setSeedDefaultsError] = useState<unknown>(null);
+  const [lookupIp, setLookupIp] = useState("");
+  const [lookupFormError, setLookupFormError] = useState<string | null>(null);
 
   const alerts = useQuery({
     queryKey: ["alerts"],
@@ -67,7 +108,11 @@ export default function Siem() {
 
   const seedDefaults = useMutation({
     mutationFn: async () => (await siemApi.post<SigmaRuleOut[]>("/rules/seed-defaults")).data,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["rules"] }),
+    onSuccess: () => {
+      setSeedDefaultsError(null);
+      queryClient.invalidateQueries({ queryKey: ["rules"] });
+    },
+    onError: (err: unknown) => setSeedDefaultsError(err),
   });
 
   const createRule = useMutation({
@@ -121,6 +166,11 @@ export default function Siem() {
     onError: (err: unknown) => setAlertActionError(err),
   });
 
+  const ipLookup = useMutation({
+    mutationFn: async (ip: string) => (await threatIntelApi.get<IpReputationOut>(`/lookup/${encodeURIComponent(ip)}`)).data,
+    onSuccess: () => setLookupFormError(null),
+  });
+
   function onCreateRule() {
     setRuleFormError(null);
     if (!ruleName.trim()) {
@@ -133,6 +183,15 @@ export default function Siem() {
       return;
     }
     createRule.mutate();
+  }
+
+  function onLookupIp() {
+    setLookupFormError(null);
+    if (!lookupIp.trim()) {
+      setLookupFormError("Ingresa una IP para consultar.");
+      return;
+    }
+    ipLookup.mutate(lookupIp.trim());
   }
 
   function updateCondition(idx: number, patch: Partial<ConditionRow>) {
@@ -167,6 +226,32 @@ export default function Siem() {
       </div>
 
       <div className="panel">
+        <h2>Threat Intel</h2>
+        <p className="empty-hint">
+          Consulta si una IP es maliciosa conocida (AbuseIPDB / MISP, via threatintel-service). Las alertas nuevas ya
+          se enriquecen automaticamente con esto -- ver columna "Threat Intel" en la tabla de abajo.
+        </p>
+        <div className="inline-form">
+          <input
+            placeholder="IP a consultar (ej. 8.8.8.8)"
+            value={lookupIp}
+            onChange={(e) => setLookupIp(e.target.value)}
+          />
+          <button className="btn-secondary" onClick={onLookupIp} disabled={ipLookup.isPending}>
+            {ipLookup.isPending ? "Consultando..." : "Consultar IP"}
+          </button>
+        </div>
+        {lookupFormError && <p className="error-text">{lookupFormError}</p>}
+        {ipLookup.data && !lookupFormError && <ThreatIntelResult result={ipLookup.data} />}
+        {ipLookup.isError && (
+          <p className="error-text">
+            No se pudo consultar threatintel-service.{" "}
+            <span className="error-detail">{connectionErrorDetail(ipLookup.error)}</span>
+          </p>
+        )}
+      </div>
+
+      <div className="panel">
         <h2>Alertas</h2>
         {alerts.isLoading && <p className="empty-hint">Cargando...</p>}
         {alerts.isError && (
@@ -183,6 +268,7 @@ export default function Siem() {
                 <th>Severidad</th>
                 <th>Estado</th>
                 <th>SOAR disparado</th>
+                <th>Threat Intel</th>
                 <th>Creada</th>
                 <th></th>
               </tr>
@@ -194,6 +280,7 @@ export default function Siem() {
                   <td><SeverityBadge value={a.severity} /></td>
                   <td><StatusBadge value={a.status} /></td>
                   <td>{a.soar_triggered ? "si" : "no"}</td>
+                  <td><ThreatIntelBadge threatIntel={a.threat_intel} /></td>
                   <td>{new Date(a.created_at).toLocaleString()}</td>
                   <td>
                     {a.status === "new" && (
@@ -210,7 +297,7 @@ export default function Siem() {
                 </tr>
               ))}
               {alerts.data.length === 0 && (
-                <tr><td colSpan={6} className="empty-hint">Sin alertas todavia.</td></tr>
+                <tr><td colSpan={7} className="empty-hint">Sin alertas todavia.</td></tr>
               )}
             </tbody>
           </table>
@@ -238,6 +325,12 @@ export default function Siem() {
             <span className="empty-hint">{seedDefaults.data.length} regla(s) nueva(s) agregada(s).</span>
           )}
         </div>
+        {seedDefaultsError != null && (
+          <p className="error-text">
+            No se pudieron cargar las reglas recomendadas.{" "}
+            <span className="error-detail">{connectionErrorDetail(seedDefaultsError)}</span>
+          </p>
+        )}
 
         <h3 style={{ marginTop: 16 }}>Nueva regla</h3>
         <div className="inline-form">

@@ -28,6 +28,7 @@ from app.schemas import (
     UserOut,
     LoginRequest,
     TokenPair,
+    MfaEnrollRequest,
     MfaEnrollResponse,
     MfaVerifyRequest,
     GoogleAuthRequest,
@@ -310,8 +311,32 @@ async def refresh(payload: RefreshRequest, db: AsyncSession = Depends(get_db)):
 
 
 @app.post("/auth/mfa/enroll", response_model=MfaEnrollResponse)
-async def mfa_enroll(claims: dict = Depends(get_current_claims), db: AsyncSession = Depends(get_db)):
+async def mfa_enroll(
+    payload: MfaEnrollRequest = MfaEnrollRequest(),
+    claims: dict = Depends(get_current_claims),
+    db: AsyncSession = Depends(get_db),
+):
+    # BUG DE SEGURIDAD (corregido aca): antes esto pisaba mfa_secret sin
+    # ninguna condicion -- cualquiera con un access_token valido (15 min,
+    # robado via XSS, un dispositivo prestado, un token que quedo en un
+    # log) podia llamar este endpoint para generarle a la victima un
+    # secret de MFA NUEVO que el atacante ya conoce, y confirmarlo el
+    # mismo con /auth/mfa/confirm -- sin necesitar el codigo TOTP real ni
+    # la contrasena. mfa_enabled seguia en True todo el tiempo, asi que la
+    # victima no veia ninguna señal de que su segundo factor cambio.
+    # Ahora, si el usuario YA tiene MFA activo, re-enrolar (generar un
+    # secret nuevo) exige probar primero que quien lo pide todavia
+    # controla el dispositivo YA enrolado (un codigo TOTP valido del
+    # secret actual) -- exactamente lo mismo que ya se le exige para
+    # cualquier otra accion sensible de la cuenta.
     user = await db.get(services.User, claims["sub"])
+    if user.mfa_enabled:
+        await _enforce_rate_limit(f"mfa_reenroll:user:{claims['sub']}", limit=10)
+        if not services.verify_current_totp(user, payload.totp_code):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Para reemplazar el MFA actual, primero confirma un codigo TOTP valido del dispositivo ya enrolado.",
+            )
     secret, otpauth_url = await services.enroll_mfa(db, user)
     await db.commit()
     return MfaEnrollResponse(secret=secret, otpauth_url=otpauth_url)

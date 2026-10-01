@@ -93,6 +93,37 @@ El modulo "purple team" se limita a: dado un conjunto de tecnicas MITRE ATT&CK
 declaradas (importadas como datos, no ejecutadas), calcular que reglas de
 deteccion SIEM las cubren y reportar gaps. Es analisis sobre datos, no ejecucion.
 
+## Componentes agregados fuera de los 11 microservicios
+
+### Stack OpenVAS/GVM (agregado 2026-09-25)
+
+`scan-service` habla el protocolo GMP contra `gvmd` (via `gvm-cli`, socket unix
+montado) para orquestar escaneos reales de OpenVAS. Eso requiere levantar el
+stack de Greenbone Community Edition completo en `docker-compose.yml`: feeds de
+datos (`vulnerability-tests`, `notus-data`, `scap-data`, `cert-bund-data`), su
+propio Postgres (`pg-gvm`) y Redis (`gvm-redis`), `gvmd`, `openvas`/`openvasd` y
+`ospd-openvas` -- alrededor de 15 servicios, sin la GUI web (`gsa`/`gsad`/nginx),
+que no hace falta. Todos viven en una red Docker propia (`gvm_internal`), sin
+salida a internet y sin camino de red hacia Postgres/Redis/el resto de los
+microservicios de SentinelOps. El detalle de cada servicio y por que
+`ospd-openvas` necesita capacidades de red elevadas esta comentado en linea en
+`docker-compose.yml`; el resumen de riesgo/mitigacion esta en
+`docs/security.md` (seccion "Elevation of Privilege").
+
+### Agente de escaneo remoto (`remote-agent/`, opcional)
+
+Script Python standalone (fuera de Docker) que resuelve un problema puntual:
+en Docker Desktop (Windows/Mac) los contenedores quedan detras de NAT y no ven
+la LAN real de la oficina/cliente, asi que un escaneo nmap contra esa LAN
+lanzado desde `scan-service` no encuentra nada. `remote-agent/agent.py` corre
+en una PC con visibilidad real a esa red (la misma donde esta SentinelOps, u
+otra de la LAN), hace polling saliente contra `scan-service` (nunca al reves,
+no requiere abrir puertos entrantes), se autentica con una API key propia
+(nunca el JWT de un usuario) y solo sabe correr nmap en modo deteccion -- igual
+que el driver de nmap del propio `scan-service`. Ver `remote-agent/README.md`
+para el detalle y `docs/security.md` (seccion Spoofing) para el modelo de
+autenticacion.
+
 ## Servicios por fase
 
 Ver `STATUS.md` en la raiz del repo para el detalle fase por fase.

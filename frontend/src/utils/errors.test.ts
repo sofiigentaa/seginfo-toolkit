@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { connectionErrorDetail } from "./errors";
+import { connectionErrorDetail, blobExportErrorDetail } from "./errors";
 
 /** Construye un objeto que `axios.isAxiosError` reconoce como AxiosError
  * sin depender de un servidor real ni de los tipos internos de axios. */
@@ -45,5 +45,30 @@ describe("connectionErrorDetail", () => {
 
   it("handles a value that is not an Error at all", () => {
     expect(connectionErrorDetail("solo un string")).toBe("solo un string");
+  });
+});
+
+
+describe("blobExportErrorDetail", () => {
+  it("extracts the real backend detail from a Blob error body (GET .../export)", async () => {
+    const error = fakeAxiosError({
+      response: {
+        status: 404,
+        data: new Blob([JSON.stringify({ detail: "Reporte no encontrado" })], { type: "application/json" }),
+      },
+    });
+    expect(await blobExportErrorDetail(error)).toBe("HTTP 404: Reporte no encontrado");
+  });
+
+  it("falls back to the raw text when the Blob body is not JSON", async () => {
+    const error = fakeAxiosError({
+      response: { status: 500, data: new Blob(["Internal Server Error"], { type: "text/plain" }) },
+    });
+    expect(await blobExportErrorDetail(error)).toBe("HTTP 500: Internal Server Error");
+  });
+
+  it("falls back to connectionErrorDetail for a non-blob error (network down, no response)", async () => {
+    const error = fakeAxiosError({ code: "ERR_NETWORK", message: "Network Error" });
+    expect(await blobExportErrorDetail(error)).toBe(connectionErrorDetail(error));
   });
 });

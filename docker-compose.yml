@@ -78,6 +78,289 @@ services:
     ports:
       - "8002:8000"
 
+
+  # --- OpenVAS/GVM (Greenbone Community Edition), subset headless -------
+  # Adaptado del compose.yaml oficial de Greenbone
+  # (https://greenbone.github.io/docs/latest/_static/compose.yaml),
+  # excluyendo gsa/gsad/gvm-config/nginx (la GUI web -- no la necesitamos,
+  # scan-service habla GMP directo contra el socket de gvmd via gvm-cli)
+  # y gvm-tools (ya instalamos ese mismo paquete pip, gvm-tools, DENTRO
+  # de scan-service -- no necesitamos un contenedor CLI aparte).
+  #
+  # Primer arranque: la sincronizacion inicial del feed de NVTs (via
+  # vulnerability-tests/notus-data/scap-data/etc, cada uno con
+  # KEEP_ALIVE: 1 para quedarse corriendo hasta que gvmd los de por
+  # completos via su healthcheck) puede tardar bastante (horas, varios
+  # GB) la primera vez. Ver README/STATUS.md para el paso manual de
+  # bootstrap del usuario admin (docker compose exec -u gvmd gvmd gvmd
+  # --user=admin --new-password=...).
+  vulnerability-tests:
+    image: registry.community.greenbone.net/community/vulnerability-tests
+    environment:
+      FEED_RELEASE: "24.10"
+      KEEP_ALIVE: 1
+    volumes:
+      - vt_data_vol:/mnt
+    networks:
+      - gvm_internal
+
+  notus-data:
+    image: registry.community.greenbone.net/community/notus-data
+    environment:
+      KEEP_ALIVE: 1
+    volumes:
+      - notus_data_vol:/mnt
+    networks:
+      - gvm_internal
+
+  scap-data:
+    image: registry.community.greenbone.net/community/scap-data
+    environment:
+      KEEP_ALIVE: 1
+    volumes:
+      - scap_data_vol:/mnt
+    networks:
+      - gvm_internal
+
+  cert-bund-data:
+    image: registry.community.greenbone.net/community/cert-bund-data
+    environment:
+      KEEP_ALIVE: 1
+    volumes:
+      - cert_data_vol:/mnt
+    networks:
+      - gvm_internal
+
+  dfn-cert-data:
+    image: registry.community.greenbone.net/community/dfn-cert-data
+    environment:
+      KEEP_ALIVE: 1
+    volumes:
+      - cert_data_vol:/mnt
+    depends_on:
+      cert-bund-data:
+        condition: service_healthy
+    networks:
+      - gvm_internal
+
+  data-objects:
+    image: registry.community.greenbone.net/community/data-objects
+    environment:
+      FEED_RELEASE: "24.10"
+      KEEP_ALIVE: 1
+    volumes:
+      - data_objects_vol:/mnt
+    networks:
+      - gvm_internal
+
+  report-formats:
+    image: registry.community.greenbone.net/community/report-formats
+    environment:
+      FEED_RELEASE: "24.10"
+      KEEP_ALIVE: 1
+    volumes:
+      - data_objects_vol:/mnt
+    depends_on:
+      data-objects:
+        condition: service_healthy
+    networks:
+      - gvm_internal
+
+  gpg-data:
+    image: registry.community.greenbone.net/community/gpg-data
+    volumes:
+      - gpg_data_vol:/mnt
+    networks:
+      - gvm_internal
+
+  gvm-redis:
+    # Redis PROPIO de GVM/ospd-openvas -- servicio y nombre distintos del
+    # `redis` que ya usa el resto de SentinelOps (sin colision: cada uno
+    # con su propio volumen de socket unix, ninguno expone puerto TCP).
+    image: registry.community.greenbone.net/community/redis-server
+    restart: unless-stopped
+    volumes:
+      - gvm_redis_socket_vol:/run/redis/
+    networks:
+      - gvm_internal
+
+  pg-gvm:
+    image: registry.community.greenbone.net/community/pg-gvm:stable
+    restart: unless-stopped
+    volumes:
+      - gvm_psql_data_vol:/var/lib/postgresql
+      - gvm_psql_socket_vol:/var/run/postgresql
+    depends_on:
+      pg-gvm-migrator:
+        condition: service_completed_successfully
+    networks:
+      - gvm_internal
+
+  pg-gvm-migrator:
+    image: registry.community.greenbone.net/community/pg-gvm-migrator:stable
+    volumes:
+      - gvm_psql_data_vol:/var/lib/postgresql
+      - gvm_psql_socket_vol:/var/run/postgresql
+    networks:
+      - gvm_internal
+
+  gvmd:
+    image: registry.community.greenbone.net/community/gvmd:stable
+    restart: unless-stopped
+    volumes:
+      - gvmd_data_vol:/var/lib/gvm
+      - scap_data_vol:/var/lib/gvm/scap-data/
+      - cert_data_vol:/var/lib/gvm/cert-data
+      - data_objects_vol:/var/lib/gvm/data-objects/gvmd
+      - vt_data_vol:/var/lib/openvas/plugins
+      - gvm_psql_data_vol:/var/lib/postgresql
+      - gvmd_socket_vol:/run/gvmd
+      - ospd_openvas_socket_vol:/run/ospd
+      - gvm_psql_socket_vol:/var/run/postgresql
+    depends_on:
+      pg-gvm:
+        condition: service_started
+      scap-data:
+        condition: service_healthy
+      cert-bund-data:
+        condition: service_healthy
+      dfn-cert-data:
+        condition: service_healthy
+      data-objects:
+        condition: service_healthy
+      report-formats:
+        condition: service_healthy
+    networks:
+      - gvm_internal
+
+  configure-openvas:
+    image: registry.community.greenbone.net/community/openvas-scanner:stable
+    volumes:
+      - openvas_data_vol:/mnt
+      - openvas_log_data_vol:/var/log/openvas
+    command:
+      - /bin/sh
+      - -c
+      - |
+        printf "table_driven_lsc = yes\nopenvasd_server = http://openvasd:80\n" > /mnt/openvas.conf
+        sed "s/127/128/" /etc/openvas/openvas_log.conf | sed 's/gvm/openvas/' > /mnt/openvas_log.conf
+        chmod 644 /mnt/openvas.conf
+        chmod 644 /mnt/openvas_log.conf
+        touch /var/log/openvas/openvas.log
+        chmod 666 /var/log/openvas/openvas.log
+    networks:
+      - gvm_internal
+
+  openvas:
+    image: registry.community.greenbone.net/community/openvas-scanner:stable
+    volumes:
+      - openvas_data_vol:/etc/openvas
+      - openvas_log_data_vol:/var/log/openvas
+    command:
+      - /bin/sh
+      - -c
+      - |
+        cat /etc/openvas/openvas.conf
+        tail -f /var/log/openvas/openvas.log
+    depends_on:
+      configure-openvas:
+        condition: service_completed_successfully
+    networks:
+      - gvm_internal
+
+  openvasd:
+    image: registry.community.greenbone.net/community/openvas-scanner:stable
+    restart: unless-stopped
+    environment:
+      OPENVASD_MODE: service_notus
+      GNUPGHOME: /etc/openvas/gnupg
+      LISTENING: 0.0.0.0:80
+    volumes:
+      - openvas_data_vol:/etc/openvas
+      - openvas_log_data_vol:/var/log/openvas
+      - gpg_data_vol:/etc/openvas/gnupg
+      - notus_data_vol:/var/lib/notus
+    depends_on:
+      vulnerability-tests:
+        condition: service_healthy
+      notus-data:
+        condition: service_healthy
+      configure-openvas:
+        condition: service_completed_successfully
+      gpg-data:
+        condition: service_completed_successfully
+    networks:
+      - gvm_internal
+
+  ospd-openvas:
+    # NET_ADMIN/NET_RAW + seccomp/apparmor sin confinar son ineliminables:
+    # el motor openvas-scanner arma paquetes crudos el mismo (sockets raw,
+    # ICMP, IP_HDRINCL) para descubrimiento/fingerprinting de host, y esos
+    # syscalls estan bloqueados por el perfil seccomp default de Docker y
+    # por AppArmor -- asi lo requiere el propio compose oficial de
+    # Greenbone, sin perfil scoped alternativo documentado. Sacarlos rompe
+    # el escaner. Lo que SI se puede (y se hizo) para achicar el impacto
+    # de una eventual falla de este contenedor puntual, sin tocar esas dos
+    # capacidades:
+    #   - no-new-privileges: bloquea escalar privilegios via setuid/setgid
+    #     en cualquier binario que corra adentro, independiente del
+    #     seccomp/apparmor sin confinar.
+    #   - red `gvm_internal` (ver el bloque `networks:` al final del
+    #     archivo): este contenedor y todo el resto del stack GVM quedan
+    #     en una red Docker propia, sin salida a internet y sin camino de
+    #     red hacia postgres/redis/el resto de los microservicios de
+    #     SentinelOps -- scan-service habla con gvmd por un socket unix
+    #     montado (volumen), no por red, asi que no hace falta compartir
+    #     red con el.
+    # (cap_drop: ALL quedo afuera a proposito: no puedo levantar este
+    # contenedor desde aca para confirmar que el entrypoint de la imagen
+    # no necesita algun otro capability de los que trae Docker por
+    # default -- ej. CHOWN/SETUID al arrancar -- y romper el arranque a
+    # ciegas es peor que dejar el set default + estas dos agregadas,
+    # que es exactamente lo que testea el compose oficial de Greenbone.)
+    image: registry.community.greenbone.net/community/ospd-openvas:stable
+    restart: unless-stopped
+    hostname: ospd-openvas.local
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    security_opt:
+      - seccomp=unconfined
+      - apparmor=unconfined
+      - no-new-privileges:true
+    command:
+      [
+        "ospd-openvas",
+        "-f",
+        "--config",
+        "/etc/gvm/ospd-openvas.conf",
+        "--notus-feed-dir",
+        "/var/lib/notus/advisories",
+        "-m",
+        "666",
+      ]
+    volumes:
+      - gpg_data_vol:/etc/openvas/gnupg
+      - vt_data_vol:/var/lib/openvas/plugins
+      - notus_data_vol:/var/lib/notus
+      - ospd_openvas_socket_vol:/run/ospd
+      - gvm_redis_socket_vol:/run/redis/
+      - openvas_data_vol:/etc/openvas/
+      - openvas_log_data_vol:/var/log/openvas
+    depends_on:
+      gvm-redis:
+        condition: service_started
+      gpg-data:
+        condition: service_completed_successfully
+      configure-openvas:
+        condition: service_completed_successfully
+      vulnerability-tests:
+        condition: service_healthy
+      notus-data:
+        condition: service_healthy
+    networks:
+      - gvm_internal
+
   scan-service:
     restart: unless-stopped
     build:
@@ -87,11 +370,24 @@ services:
     environment:
       POSTGRES_HOST: postgres
       REDIS_HOST: redis
+      GVM_SOCKET_PATH: /run/gvmd/gvmd.sock
+    volumes:
+      # Cache de la DB de CVEs de trivy y de las plantillas de nuclei --
+      # persistentes entre reinicios/rebuilds para que solo se paguen
+      # una vez (ver Dockerfile y app/scanners/{trivy,nuclei}.py).
+      - trivy_cache:/root/.cache/trivy
+      - nuclei_templates:/root/nuclei-templates
+      # Socket unix de gvmd para hablar GMP via gvm-cli (ver
+      # app/scanners/openvas.py). Montado read-only: scan-service es un
+      # cliente, no administra gvmd.
+      - gvmd_socket_vol:/run/gvmd:ro
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+      gvmd:
+        condition: service_started
     ports:
       - "8003:8000"
 
@@ -123,6 +419,7 @@ services:
       REDIS_HOST: redis
       OPENSEARCH_HOST: opensearch
       SOAR_SERVICE_URL: http://soar-service:8000
+      THREATINTEL_SERVICE_URL: http://threatintel-service:8000
     depends_on:
       postgres:
         condition: service_healthy
@@ -259,6 +556,80 @@ services:
     ports:
       - "8011:8000"
 
+  threatintel-service:
+    restart: unless-stopped
+    build:
+      context: .
+      dockerfile: backend/services/threatintel-service/Dockerfile
+    env_file: .env
+    environment:
+      POSTGRES_HOST: postgres
+      REDIS_HOST: redis
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8012:8000"
+
+  asm-service:
+    restart: unless-stopped
+    build:
+      context: .
+      dockerfile: backend/services/asm-service/Dockerfile
+    env_file: .env
+    environment:
+      POSTGRES_HOST: postgres
+      REDIS_HOST: redis
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8013:8000"
+
+  cloud-service:
+    restart: unless-stopped
+    build:
+      context: .
+      dockerfile: backend/services/cloud-service/Dockerfile
+    env_file: .env
+    environment:
+      POSTGRES_HOST: postgres
+      REDIS_HOST: redis
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8014:8000"
+
+  coderepo-service:
+    restart: unless-stopped
+    build:
+      context: .
+      dockerfile: backend/services/coderepo-service/Dockerfile
+    env_file: .env
+    environment:
+      POSTGRES_HOST: postgres
+      REDIS_HOST: redis
+    volumes:
+      # Cache de la DB de CVEs de trivy -- PROPIO de este servicio, nunca
+      # el `trivy_cache` de scan-service (dos contenedores escribiendo la
+      # misma cache de trivy en simultaneo puede corromper el archivo
+      # bolt de la DB). Ver Dockerfile y app/services.py.
+      - coderepo_trivy_cache:/root/.cache/trivy
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8015:8000"
+
   frontend:
     restart: unless-stopped
     build:
@@ -276,8 +647,48 @@ services:
       - report-service
       - notification-service
       - integration-service
+      - threatintel-service
+      - asm-service
+      - cloud-service
+      - coderepo-service
     ports:
       - "5173:5173"
 
+networks:
+  default: {}
+  # Red interna dedicada para todo el stack GVM/OpenVAS -- ningun otro
+  # servicio de SentinelOps (postgres, redis, el resto de microservicios)
+  # comparte esta red. scan-service NO la necesita: habla con gvmd via el
+  # socket unix montado (gvmd_socket_vol), no por red. `internal: true`
+  # ademas le saca conectividad de salida a internet -- los datos de feed
+  # ya vienen empaquetados en las imagenes de los populadores, no se
+  # descargan en runtime. Asi, si ospd-openvas (el unico contenedor con
+  # NET_ADMIN/NET_RAW + seccomp/apparmor sin confinar) se ve comprometido,
+  # no tiene ningun camino de red hacia el resto de la plataforma.
+  gvm_internal:
+    internal: true
+
 volumes:
   pgdata:
+  # scan-service: cache persistente de trivy/nuclei (ver Dockerfile y
+  # app/scanners/{trivy,nuclei}.py)
+  trivy_cache:
+  nuclei_templates:
+  # coderepo-service: cache persistente de trivy, PROPIA (nunca se
+  # comparte con scan-service, ver docstring del servicio arriba)
+  coderepo_trivy_cache:
+  # OpenVAS/GVM (Greenbone Community Edition, subset headless)
+  gpg_data_vol:
+  scap_data_vol:
+  cert_data_vol:
+  data_objects_vol:
+  gvmd_data_vol:
+  gvm_psql_data_vol:
+  vt_data_vol:
+  notus_data_vol:
+  gvm_psql_socket_vol:
+  gvmd_socket_vol:
+  ospd_openvas_socket_vol:
+  gvm_redis_socket_vol:
+  openvas_data_vol:
+  openvas_log_data_vol:

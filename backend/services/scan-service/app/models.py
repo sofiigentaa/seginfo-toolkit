@@ -29,6 +29,7 @@ class ScanStatus(str, enum.Enum):
     completed = "completed"
     failed = "failed"
     scanner_unavailable = "scanner_unavailable"
+    cancelled = "cancelled"
 
 
 class ScanSchedule(Base):

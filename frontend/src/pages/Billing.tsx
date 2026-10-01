@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { authApi } from "../services/api";
 import { useAuthStore } from "../store/auth";
@@ -100,6 +100,25 @@ export default function Billing() {
       setConfirmingCancel(false);
     },
   });
+
+  // BUG (corregido aca): ninguno de estos estados (link de pago
+  // generado/error, resultado/error de cancelacion, el paso de
+  // "¿confirmas?" a mitad de cancelar) se reseteaba al cambiar la
+  // organizacion elegida (un platform_admin puede administrar la
+  // facturacion de cualquier cliente desde el mismo selector). Si
+  // cancelaba la suscripcion de la organizacion A y despues elegia la
+  // organizacion B, seguia viendo "Listo, se cancelo el proximo cobro..."
+  // como si acabara de cancelar la de B -- un cartel de exito/error que
+  // en realidad es de OTRA organizacion. Todo esto es estado propio de
+  // esta pagina (no de la query cacheada por organizacion), asi que se
+  // limpia a mano cada vez que cambia activeOrgId.
+  useEffect(() => {
+    setPayError(null);
+    setPayUrl(null);
+    setCancelError(null);
+    setCancelResult(null);
+    setConfirmingCancel(false);
+  }, [activeOrgId]);
 
   if (!isPlatformAdmin && !isOrgAdmin) {
     return (

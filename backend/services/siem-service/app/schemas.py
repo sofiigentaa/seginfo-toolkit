@@ -71,7 +71,11 @@ class SigmaRuleOut(BaseModel):
 
 class AlertUpdate(BaseModel):
     status: AlertStatus
-    notes: str = ""
+    # None = "no toques las notas" (ver app/services.py::update_alert /
+    # _resolve_alert_update): un PATCH que solo cambia el estado (ej. los
+    # botones Reconocer/Cerrar de la UI, que mandan solo {status}) no debe
+    # borrar una nota ya guardada por pisarla con "".
+    notes: str | None = None
 
 
 class AlertOut(BaseModel):
@@ -82,6 +86,9 @@ class AlertOut(BaseModel):
     matched_event: dict
     status: AlertStatus
     soar_triggered: bool
+    # {} si threatintel-service no respondio o ninguna IP del evento
+    # resulto maliciosa conocida -- ver app/models.py::Alert.threat_intel.
+    threat_intel: dict = {}
     acknowledged_by: str
     notes: str
     created_at: datetime

@@ -62,6 +62,14 @@ class Alert(Base):
     matched_event: Mapped[dict] = mapped_column(JSON, default=dict)
     status: Mapped[AlertStatus] = mapped_column(SAEnum(AlertStatus, native_enum=False), default=AlertStatus.new)
     soar_triggered: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Poblado best-effort al crear la alerta (ver
+    # app/services.py::_enrich_alert_with_threat_intel) llamando a
+    # threatintel-service con las IPs presentes en el evento que la
+    # disparo -- solo guarda las IPs que vinieron marcadas como
+    # maliciosas conocidas (is_malicious=True), para no inflar la
+    # columna con ruido de IPs limpias. {} si threatintel-service no
+    # respondio o ninguna IP del evento resulto maliciosa.
+    threat_intel: Mapped[dict] = mapped_column(JSON, default=dict)
     acknowledged_by: Mapped[str] = mapped_column(String(255), default="")
     notes: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)

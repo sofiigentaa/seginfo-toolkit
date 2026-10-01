@@ -56,7 +56,14 @@ def _rules_by_technique(rules: list[dict]) -> dict[str, list[str]]:
 
 
 def _build_coverage(technique_ids_scope, rule_map: dict[str, list[str]], exercise_id: str | None = None) -> CoverageResult:
-    universe = ATTACK_TECHNIQUES if not technique_ids_scope else [
+    """technique_ids_scope=None significa "sin recorte, usar todo el
+    catalogo" (caso de /coverage/overall). Una lista, incluso vacia,
+    significa "el caller pidio un recorte especifico" y debe filtrarse
+    como tal -- antes se usaba `if not technique_ids_scope` (verdad/
+    falsedad), asi que un ejercicio con declared_technique_ids=[] caia en
+    la misma rama que None y terminaba calculando la cobertura contra
+    TODO el catalogo ATT&CK en vez de reportar 0 tecnicas declaradas."""
+    universe = ATTACK_TECHNIQUES if technique_ids_scope is None else [
         t for t in ATTACK_TECHNIQUES if t["technique_id"] in technique_ids_scope
     ]
     techniques: list[TechniqueCoverage] = []
@@ -137,8 +144,11 @@ async def compute_coverage_for_exercise(db: AsyncSession, exercise: PurpleExerci
     propio ejercicio para consulta rapida posterior."""
     rules = await fetch_rule_tags(exercise.organization_id)
     rule_map = _rules_by_technique(rules)
-    scope = exercise.declared_technique_ids or None
-    result = _build_coverage(scope, rule_map, exercise_id=exercise.id)
+    # declared_technique_ids es siempre una lista (nunca None, ver
+    # app/models.py) -- se pasa tal cual, sin "or None": una lista vacia
+    # debe recortar el universo a 0 tecnicas, no expandirlo a todo el
+    # catalogo (ver _build_coverage).
+    result = _build_coverage(exercise.declared_technique_ids, rule_map, exercise_id=exercise.id)
     exercise.last_coverage_result = result.model_dump()
     exercise.updated_at = _now()
     await db.flush()

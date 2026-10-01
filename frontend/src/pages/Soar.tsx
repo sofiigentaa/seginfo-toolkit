@@ -128,7 +128,7 @@ export default function Soar() {
     onError: (err: unknown, playbook) => {
       setRunFeedback({
         playbookId: playbook.id,
-        message: err instanceof Error ? err.message : "No se pudo ejecutar el playbook.",
+        message: `No se pudo ejecutar el playbook. ${connectionErrorDetail(err)}`,
       });
     },
   });
@@ -342,6 +342,13 @@ export default function Soar() {
 
       <div className="panel">
         <h2>Ejecuciones</h2>
+        {runs.isLoading && <p className="empty-hint">Cargando...</p>}
+        {runs.isError && (
+          <p className="error-text">
+            No se pudo conectar con soar-service.{" "}
+            <span className="error-detail">{connectionErrorDetail(runs.error)}</span>
+          </p>
+        )}
         {runs.data && (
           <table className="data-table">
             <thead>

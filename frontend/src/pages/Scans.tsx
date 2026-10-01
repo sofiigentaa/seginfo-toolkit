@@ -1,9 +1,9 @@
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { scanApi } from "../services/api";
-import type { ScanJobOut, ScanScheduleOut, ScanAgentOut, ScanAgentCreated, AgentScanJobOut } from "../types";
+import { scanApi, vulnApi } from "../services/api";
+import type { ScanJobOut, ScanScheduleOut, ScanAgentOut, ScanAgentCreated, AgentScanJobOut, VulnerabilityOut } from "../types";
 import PageHeader from "../components/PageHeader";
-import { StatusBadge } from "../components/Badge";
+import { SeverityBadge, StatusBadge } from "../components/Badge";
 import { connectionErrorDetail } from "../utils/errors";
 
 const DAY_LABELS = ["Lunes", "Martes", "Miercoles", "Jueves", "Viernes", "Sabado", "Domingo"];
@@ -17,6 +17,7 @@ function scheduleWhen(s: ScanScheduleOut): string {
 }
 
 type ScannerType = "nmap" | "trivy" | "nuclei" | "openvas";
+type NmapMode = "fast" | "full";
 type NetworkScope = "lan" | "man" | "wan" | "custom";
 
 const SCOPE_LABELS: Record<NetworkScope, string> = {
@@ -31,11 +32,107 @@ const SCOPE_LABELS: Record<NetworkScope, string> = {
 // memoria la notacion CIDR. Siempre editable antes de lanzar el escaneo.
 const LAN_PRESETS = ["192.168.0.0/24", "192.168.1.0/24", "10.0.0.0/24", "172.16.0.0/24"];
 
-const TERMINAL_STATUSES = new Set(["completed", "failed", "scanner_unavailable"]);
+const TERMINAL_STATUSES = new Set(["completed", "failed", "scanner_unavailable", "cancelled"]);
+const CANCELLABLE_STATUSES = new Set(["pending", "running"]);
 
 function scopeOf(job: ScanJobOut): string {
   const raw = job.options?.network_scope;
   return typeof raw === "string" && raw in SCOPE_LABELS ? raw : "-";
+}
+
+function packageLine(v: VulnerabilityOut): string | null {
+  if (!v.package) return null;
+  let line = v.package;
+  if (v.installed_version) line += ` (${v.installed_version}`;
+  if (v.fixed_version) line += ` -> ${v.fixed_version}`;
+  if (v.installed_version) line += ")";
+  return line;
+}
+
+// Resultados enriquecidos (severidad, CVSS/EPSS/KEV, remediacion sugerida)
+// de UN escaneo puntual -- vuln-service ya hace todo ese trabajo (ver
+// pagina Vulnerabilidades); esto solo lo consulta filtrado por
+// scan_job_id y lo muestra en el lugar donde el escaneo se lanzo, para no
+// tener que ir a buscar "que encontro" a otra pagina. Componente separado
+// para poder llamar useQuery solo cuando la fila esta expandida (nunca se
+// monta si el escaneo no se abrio).
+function ScanResultsPanel({
+  scanJobId,
+  status,
+  errorMessage,
+}: {
+  scanJobId: string;
+  status: string;
+  errorMessage: string;
+}) {
+  const isCompleted = status === "completed";
+  const isTerminalFailure = status === "failed" || status === "scanner_unavailable";
+  const isCancelled = status === "cancelled";
+
+  const results = useQuery({
+    queryKey: ["scan-vulnerabilities", scanJobId],
+    queryFn: async () =>
+      (await vulnApi.get<VulnerabilityOut[]>("/vulnerabilities", { params: { scan_job_id: scanJobId } })).data,
+    enabled: isCompleted,
+  });
+
+  if (isCancelled) {
+    return <p className="empty-hint">Este escaneo fue cancelado -- no hay resultados.</p>;
+  }
+  if (isTerminalFailure) {
+    return (
+      <p className="error-text">
+        El escaneo fallo, no hay resultados. <span className="error-detail">{errorMessage || "Sin detalle del error."}</span>
+      </p>
+    );
+  }
+  if (!isCompleted) {
+    return <p className="empty-hint">El escaneo todavia esta en curso -- los resultados aparecen aca cuando termine.</p>;
+  }
+  if (results.isLoading) {
+    return <p className="empty-hint">Cargando resultados...</p>;
+  }
+  if (results.isError) {
+    return (
+      <p className="error-text">
+        No se pudo conectar con vuln-service para traer los resultados enriquecidos.{" "}
+        <span className="error-detail">{connectionErrorDetail(results.error)}</span>
+      </p>
+    );
+  }
+  if (!results.data || results.data.length === 0) {
+    return <p className="empty-hint">Este escaneo no encontro hallazgos.</p>;
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      {results.data.map((v) => {
+        const pkgLine = packageLine(v);
+        return (
+          <div key={v.id} className="panel" style={{ background: "rgba(0,0,0,0.03)" }}>
+            <div className="inline-form" style={{ alignItems: "center" }}>
+              <SeverityBadge value={v.severity} />
+              <strong>{v.title}</strong>
+              {v.cve_id && <span className="mono">{v.cve_id}</span>}
+            </div>
+            {(pkgLine || v.port != null) && (
+              <p className="empty-hint" style={{ marginTop: 4, marginBottom: 4 }}>
+                {pkgLine && <>Paquete: {pkgLine}. </>}
+                {v.port != null && <>Puerto: {v.port}{v.service && ` (${v.service})`}.</>}
+              </p>
+            )}
+            {v.description && <p style={{ marginTop: 4, marginBottom: 4 }}>{v.description}</p>}
+            <strong style={{ display: "block", marginTop: 6 }}>Remediacion sugerida:</strong>
+            <ul style={{ marginTop: 4, marginBottom: 0 }}>
+              {v.remediation_steps.map((step, idx) => (
+                <li key={idx}>{step}</li>
+              ))}
+            </ul>
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 export default function Scans() {
@@ -43,6 +140,7 @@ export default function Scans() {
   const [name, setName] = useState("");
   const [scannerType, setScannerType] = useState<ScannerType>("nmap");
   const [scope, setScope] = useState<NetworkScope>("lan");
+  const [nmapMode, setNmapMode] = useState<NmapMode>("full");
   const [targetsText, setTargetsText] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
   const [lastResult, setLastResult] = useState<{ ok: number; failed: number } | null>(null);
@@ -68,6 +166,12 @@ export default function Scans() {
   const [agentActionError, setAgentActionError] = useState<unknown>(null);
   const [scanActionError, setScanActionError] = useState<unknown>(null);
   const [agentScanActionError, setAgentScanActionError] = useState<unknown>(null);
+
+  // Fila expandida (a lo sumo una por tabla) mostrando los resultados
+  // completos del escaneo -- severidad, CVSS/EPSS/KEV y remediacion
+  // sugerida, via ScanResultsPanel.
+  const [expandedScanId, setExpandedScanId] = useState<string | null>(null);
+  const [expandedAgentScanId, setExpandedAgentScanId] = useState<string | null>(null);
 
   const scans = useQuery({
     queryKey: ["scans"],
@@ -173,6 +277,15 @@ export default function Scans() {
     onError: (err: unknown) => setScanActionError(err),
   });
 
+  const cancelScan = useMutation({
+    mutationFn: async (id: string) => (await scanApi.post<ScanJobOut>(`/scans/${id}/cancel`)).data,
+    onSuccess: () => {
+      setScanActionError(null);
+      queryClient.invalidateQueries({ queryKey: ["scans"] });
+    },
+    onError: (err: unknown) => setScanActionError(err),
+  });
+
   const deleteAgentScan = useMutation({
     mutationFn: async (id: string) => scanApi.delete(`/agent-scans/${id}`),
     onSuccess: () => {
@@ -197,7 +310,7 @@ export default function Scans() {
             name: name || `Escaneo ${SCOPE_LABELS[scope]}`,
             scanner_type: scannerType,
             target,
-            options: { network_scope: scope },
+            options: scannerType === "nmap" ? { network_scope: scope, mode: nmapMode } : { network_scope: scope },
           })
         )
       );
@@ -245,7 +358,31 @@ export default function Scans() {
               <option key={value} value={value}>{label}</option>
             ))}
           </select>
+          {scannerType === "nmap" && (
+            <select
+              value={nmapMode}
+              onChange={(e) => setNmapMode(e.target.value as NmapMode)}
+              title="Rapido: sin scripts NSE, top-100 puertos, mas veloz. Completo: deteccion de version + scripts NSE seguros, mas lento y mas exhaustivo."
+            >
+              <option value="fast">nmap rapido (top-100 puertos, sin scripts, mas veloz)</option>
+              <option value="full">nmap completo (deteccion + scripts seguros, mas lento)</option>
+            </select>
+          )}
         </div>
+
+        {(scope === "lan" || scope === "man") && (
+          <div className="panel" style={{ marginTop: 8, marginBottom: 8, border: "1px solid #d9a900" }}>
+            <p style={{ margin: 0 }}>
+              <strong>Este escaneo corre DENTRO del contenedor Docker, no en la red real de esta PC.</strong> Docker
+              Desktop aisla al contenedor detras de NAT, asi que salvo que Docker tenga acceso directo a esa red, no
+              va a llegar a los dispositivos de tu {scope === "lan" ? "LAN" : "MAN"} y el escaneo va a terminar en
+              timeout despues de un par de minutos. Para escanear la red real de la oficina/sede, usa{" "}
+              <strong>"Escaneos remotos"</strong> mas abajo: un agente liviano corre fuera de Docker (en esta PC o en
+              cualquier otra con visibilidad a esa red) y hace polling hacia scan-service, sin que haga falta abrir
+              ningun puerto.
+            </p>
+          </div>
+        )}
 
         <textarea
           className="targets-textarea"
@@ -540,22 +677,37 @@ export default function Scans() {
             </thead>
             <tbody>
               {agentScans.data.map((j) => (
-                <tr key={j.id}>
-                  <td>{j.name || "-"}</td>
-                  <td>{(agents.data ?? []).find((a) => a.id === j.agent_id)?.name ?? j.agent_id}</td>
-                  <td className="mono">{j.target}</td>
-                  <td>
-                    <StatusBadge value={j.status} />
-                    {j.error_message && <span className="error-detail">{j.error_message}</span>}
-                  </td>
-                  <td>{j.findings.length}</td>
-                  <td>{new Date(j.created_at).toLocaleString()}</td>
-                  <td>
-                    {TERMINAL_STATUSES.has(j.status) && (
-                      <button className="btn-link" onClick={() => deleteAgentScan.mutate(j.id)}>Eliminar</button>
-                    )}
-                  </td>
-                </tr>
+                <Fragment key={j.id}>
+                  <tr>
+                    <td>{j.name || "-"}</td>
+                    <td>{(agents.data ?? []).find((a) => a.id === j.agent_id)?.name ?? j.agent_id}</td>
+                    <td className="mono">{j.target}</td>
+                    <td>
+                      <StatusBadge value={j.status} />
+                      {j.error_message && <span className="error-detail">{j.error_message}</span>}
+                    </td>
+                    <td>{j.findings.length}</td>
+                    <td>{new Date(j.created_at).toLocaleString()}</td>
+                    <td>
+                      <button
+                        className="btn-link"
+                        onClick={() => setExpandedAgentScanId(expandedAgentScanId === j.id ? null : j.id)}
+                      >
+                        {expandedAgentScanId === j.id ? "Ocultar resultados" : "Ver resultados"}
+                      </button>
+                      {TERMINAL_STATUSES.has(j.status) && (
+                        <button className="btn-link" onClick={() => deleteAgentScan.mutate(j.id)}>Eliminar</button>
+                      )}
+                    </td>
+                  </tr>
+                  {expandedAgentScanId === j.id && (
+                    <tr key={`${j.id}-detail`}>
+                      <td colSpan={7} className="panel" style={{ background: "rgba(0,0,0,0.03)" }}>
+                        <ScanResultsPanel scanJobId={j.id} status={j.status} errorMessage={j.error_message} />
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
               ))}
               {agentScans.data.length === 0 && (
                 <tr><td colSpan={7} className="empty-hint">Sin escaneos remotos todavia.</td></tr>
@@ -602,25 +754,46 @@ export default function Scans() {
             </thead>
             <tbody>
               {scans.data.map((s) => (
-                <tr key={s.id}>
-                  <td>{s.name}</td>
-                  <td>{s.scanner_type}</td>
-                  <td className="mono">{s.target}</td>
-                  <td>{scopeOf(s)}</td>
-                  <td>
-                    <StatusBadge value={s.status} />
-                    {s.error_message && (
-                      <span className="error-detail">{s.error_message}</span>
-                    )}
-                  </td>
-                  <td>{s.findings.length}</td>
-                  <td>{new Date(s.created_at).toLocaleString()}</td>
-                  <td>
-                    {TERMINAL_STATUSES.has(s.status) && (
-                      <button className="btn-link" onClick={() => deleteScan.mutate(s.id)}>Eliminar</button>
-                    )}
-                  </td>
-                </tr>
+                <Fragment key={s.id}>
+                  <tr>
+                    <td>{s.name}</td>
+                    <td>{s.scanner_type}</td>
+                    <td className="mono">{s.target}</td>
+                    <td>{scopeOf(s)}</td>
+                    <td>
+                      <StatusBadge value={s.status} />
+                      {s.error_message && (
+                        <span className="error-detail">{s.error_message}</span>
+                      )}
+                    </td>
+                    <td>{s.findings.length}</td>
+                    <td>{new Date(s.created_at).toLocaleString()}</td>
+                    <td>
+                      <button className="btn-link" onClick={() => setExpandedScanId(expandedScanId === s.id ? null : s.id)}>
+                        {expandedScanId === s.id ? "Ocultar resultados" : "Ver resultados"}
+                      </button>
+                      {CANCELLABLE_STATUSES.has(s.status) && (
+                        <button
+                          className="btn-link"
+                          disabled={cancelScan.isPending}
+                          onClick={() => cancelScan.mutate(s.id)}
+                        >
+                          Cancelar
+                        </button>
+                      )}
+                      {TERMINAL_STATUSES.has(s.status) && (
+                        <button className="btn-link" onClick={() => deleteScan.mutate(s.id)}>Eliminar</button>
+                      )}
+                    </td>
+                  </tr>
+                  {expandedScanId === s.id && (
+                    <tr key={`${s.id}-detail`}>
+                      <td colSpan={8} className="panel" style={{ background: "rgba(0,0,0,0.03)" }}>
+                        <ScanResultsPanel scanJobId={s.id} status={s.status} errorMessage={s.error_message} />
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
               ))}
               {scans.data.length === 0 && (
                 <tr><td colSpan={8} className="empty-hint">Sin escaneos ejecutados todavia.</td></tr>

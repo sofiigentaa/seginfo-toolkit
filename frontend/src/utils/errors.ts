@@ -31,3 +31,34 @@ export function connectionErrorDetail(error: unknown): string {
   }
   return String(error);
 }
+
+/**
+ * Igual que connectionErrorDetail, pero para un request hecho con
+ * `responseType: "blob"` (ej. GET /reports/{id}/export?format=csv|pdf en
+ * Reports.tsx). Con responseType:"blob" axios entrega el body de un
+ * error tal cual: error.response.data queda como un Blob, nunca como el
+ * JSON {detail: "..."} que devuelve FastAPI -- JSON.stringify(blob) da
+ * "{}" y connectionErrorDetail sola nunca puede mostrar el detail real
+ * (ej. "Reporte no encontrado"). Esta funcion lee el Blob como texto y,
+ * si es JSON valido con `detail`, lo usa; para cualquier otro caso (sin
+ * respuesta, timeout, blob vacio/no-JSON) se apoya en
+ * connectionErrorDetail.
+ */
+export async function blobExportErrorDetail(error: unknown): Promise<string> {
+  if (axios.isAxiosError(error) && error.response?.data instanceof Blob) {
+    try {
+      const text = await error.response.data.text();
+      try {
+        const parsed = JSON.parse(text);
+        const detail =
+          typeof parsed === "object" && parsed !== null && "detail" in parsed ? String((parsed as { detail?: unknown }).detail) : text;
+        return `HTTP ${error.response.status}: ${detail}`.slice(0, 300);
+      } catch {
+        return `HTTP ${error.response.status}: ${text || "sin detalle"}`.slice(0, 300);
+      }
+    } catch {
+      // no se pudo ni leer el blob -- se cae al mensaje generico de abajo
+    }
+  }
+  return connectionErrorDetail(error);
+}

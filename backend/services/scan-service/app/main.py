@@ -9,6 +9,7 @@ from prometheus_client import Counter, make_asgi_app
 from sqlalchemy.ext.asyncio import AsyncSession
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 from apscheduler.jobstores.base import JobLookupError
 
 from sqlalchemy import text
@@ -98,6 +99,30 @@ async def lifespan(app: FastAPI):
         for schedule in await services.list_schedules(db):
             if schedule.enabled:
                 _register_job(schedule)
+    # Refresh periodico de datos de escaner (DB de CVEs de trivy, plantillas
+    # de nuclei) en segundo plano -- asi cada escaneo individual no paga el
+    # costo de descarga/actualizacion (ver app/scanners/trivy.py y
+    # app/scanners/nuclei.py, que corren con --skip-db-update / -duc).
+    # next_run_time=ahora para que corra una vez apenas arranca el servicio
+    # (por si el volumen persistente esta vacio en el primer `docker compose up`)
+    # y despues cada N horas.
+    from datetime import datetime as _dt
+    scheduler.add_job(
+        services.refresh_trivy_db,
+        trigger=IntervalTrigger(hours=24),
+        id="trivy-db-refresh",
+        replace_existing=True,
+        next_run_time=_dt.now(),
+        misfire_grace_time=3600,
+    )
+    scheduler.add_job(
+        services.refresh_nuclei_templates,
+        trigger=IntervalTrigger(hours=12),
+        id="nuclei-templates-refresh",
+        replace_existing=True,
+        next_run_time=_dt.now(),
+        misfire_grace_time=3600,
+    )
     scheduler.start()
     logger.info("scan-service iniciado", extra={"reglas_programadas": len(scheduler.get_jobs())})
     yield
@@ -172,6 +197,23 @@ async def delete_scan(
     await services.delete_scan_job(db, job)
     await db.commit()
     logger.info("scan job borrado", extra={"job_id": job_id, "actor": claims.get("sub")})
+
+
+@app.post("/scans/{job_id}/cancel", response_model=ScanJobOut)
+async def cancel_scan(
+    job_id: str,
+    claims: dict = Depends(require_role("admin", "soc_manager", "analyst")),
+    db: AsyncSession = Depends(get_db),
+):
+    job = await services.get_scan_job(db, job_id, org_id_from_claims(claims))
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job de escaneo no encontrado")
+    if not services.is_cancellable_status(job.status):
+        raise HTTPException(status_code=409, detail="Solo se pueden cancelar escaneos pendientes o en curso")
+    job = await services.cancel_scan_job(db, job)
+    await db.commit()
+    logger.info("scan job cancelado", extra={"job_id": job_id, "actor": claims.get("sub")})
+    return job
 
 
 @app.post("/scan-schedules", response_model=ScanScheduleOut, status_code=status.HTTP_201_CREATED)
@@ -326,9 +368,15 @@ async def submit_agent_result(
     agent=Depends(get_agent_from_key),
     db: AsyncSession = Depends(get_db),
 ):
-    job = await services.submit_agent_result(db, agent, job_id, payload)
+    job = await services.get_agent_job_for_agent(db, agent, job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Job no encontrado o no pertenece a este agente")
+    if not services.is_submittable_status(job.status):
+        raise HTTPException(
+            status_code=409,
+            detail="Este job de escaneo remoto ya tiene un resultado final, no se puede sobreescribir",
+        )
+    job = await services.submit_agent_result(db, agent, job, payload)
     await db.commit()
     logger.info("resultado de escaneo remoto recibido", extra={"job_id": job_id, "status": payload.status})
     return job

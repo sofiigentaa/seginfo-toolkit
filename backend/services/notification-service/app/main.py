@@ -4,7 +4,7 @@ DRY-RUN (NOTIFICATION_DRY_RUN=true): registra la notificacion que *se
 enviaria* sin hacer ninguna llamada de red real, igual que el patron de
 soar-service."""
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Depends, status
+from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from prometheus_client import Counter, make_asgi_app
 from sqlalchemy.ext.asyncio import AsyncSession

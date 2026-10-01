@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { authApi } from "../services/api";
 import { useAuthStore } from "../store/auth";
 import type { OrganizationCreateResult, OrganizationOut, SsoConfigOut } from "../types";
 import PageHeader from "../components/PageHeader";
+import { resolveSsoFormValues } from "../utils/ssoForm";
 
 // Esta pagina cubre dos cosas relacionadas pero con permisos distintos
 // (ver backend/services/auth-service/app/dependencies.py):
@@ -86,16 +87,43 @@ export default function Organizations() {
     queryKey: ["sso-config", activeOrgId],
     queryFn: async () => {
       const { data } = await authApi.get<SsoConfigOut | null>(`/auth/organizations/${activeOrgId}/sso`);
-      if (data) {
-        setIssuer(data.issuer);
-        setClientId(data.client_id);
-        setDefaultRole(data.default_role);
-        setSsoEnabled(data.enabled);
-      }
       return data;
     },
     enabled: !!activeOrgId && (isPlatformAdmin || isOrgAdmin),
   });
+
+  // BUG (corregido aca): antes, los campos del formulario se completaban
+  // "a mano" dentro del queryFn de arriba, y SOLO cuando el backend
+  // devolvia una config (`if (data) {...}`). Si un platform_admin elegia
+  // primero una organizacion CON SSO configurado y despues otra SIN
+  // configurar, los campos se quedaban con los valores de la organizacion
+  // anterior (issuer/client_id/rol/enabled) en vez de volver a los
+  // defaults -- riesgo real de guardar por error la config de una
+  // organizacion en OTRA. Este efecto corre cada vez que cambia la
+  // organizacion elegida o llega una respuesta nueva, y siempre resuelve
+  // un valor explicito (resolveSsoFormValues, ver utils/ssoForm.ts) en vez
+  // de solo completar cuando hay datos.
+  useEffect(() => {
+    const values = resolveSsoFormValues(ssoConfig.data);
+    setIssuer(values.issuer);
+    setClientId(values.clientId);
+    setDefaultRole(values.defaultRole);
+    setSsoEnabled(values.enabled);
+    setClientSecret("");
+  }, [activeOrgId, ssoConfig.data]);
+
+  // Idem para los carteles de exito/error de guardado: son especificos de
+  // la organizacion que se estaba editando cuando se guardo, asi que si el
+  // admin cambia de organizacion elegida no tiene que seguir viendo
+  // "Configuracion de SSO guardada" (o un error) que corresponde a la
+  // organizacion anterior. A diferencia del efecto de arriba, este NO
+  // debe depender de ssoConfig.data -- el guardado exitoso invalida esa
+  // query (ver saveSsoConfig.onSuccess) y el refetch resultante no tiene
+  // que borrar el cartel que ese mismo guardado acaba de mostrar.
+  useEffect(() => {
+    setSsoSaveError(null);
+    setSsoSaved(false);
+  }, [activeOrgId]);
 
   const saveSsoConfig = useMutation({
     mutationFn: async () =>

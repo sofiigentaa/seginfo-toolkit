@@ -70,11 +70,12 @@ async def list_vulnerabilities(
     severity: str | None = None,
     asset_id: str | None = None,
     min_priority: float | None = None,
+    scan_job_id: str | None = None,
     claims: dict = Depends(get_current_claims),
     db: AsyncSession = Depends(get_db),
 ):
     return await services.list_vulnerabilities(
-        db, org_id_from_claims(claims), status_filter, severity, asset_id, min_priority
+        db, org_id_from_claims(claims), status_filter, severity, asset_id, min_priority, scan_job_id
     )
 
 

@@ -9,23 +9,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.shared.logging import configure_logging
 from backend.shared.tenancy import DEFAULT_ORGANIZATION_ID
 from app.models import Playbook, PlaybookRun, PendingCase, RunStatus
-from app.actions.block_ip import BlockIpAction
-from app.actions.isolate_host import IsolateHostAction
-from app.actions.create_case import CreateCaseAction
-from app.actions.create_ticket import CreateTicketAction
-from app.actions.notify import NotifyAction
+# ACTIONS es el registro unico de acciones de playbook -- ver
+# app/actions/__init__.py (antes este modulo mantenia su propio dict
+# ACTIONS duplicado, que se desincronizo del de app/actions/__init__.py:
+# ese otro le faltaba 'create_ticket' y 'notify'. Un solo import evita que
+# vuelva a pasar).
+from app.actions import ACTIONS
 
 logger = configure_logging("soar-service")
 
 _SEVERITY_RANK = {"info": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}
-
-ACTIONS = {
-    "block_ip": BlockIpAction(),
-    "isolate_host": IsolateHostAction(),
-    "create_case": CreateCaseAction(),
-    "create_ticket": CreateTicketAction(),
-    "notify": NotifyAction(),
-}
 
 
 def _now() -> datetime:

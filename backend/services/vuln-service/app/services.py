@@ -147,6 +147,7 @@ async def list_vulnerabilities(
     severity: str | None = None,
     asset_id: str | None = None,
     min_priority: float | None = None,
+    scan_job_id: str | None = None,
 ) -> list[Vulnerability]:
     query = select(Vulnerability).where(Vulnerability.organization_id == organization_id)
     if status_filter:
@@ -157,6 +158,15 @@ async def list_vulnerabilities(
         query = query.where(Vulnerability.asset_id == asset_id)
     if min_priority is not None:
         query = query.where(Vulnerability.priority_score >= min_priority)
+    if scan_job_id:
+        # Usado por la pagina de Escaneos para mostrar los resultados
+        # enriquecidos (severidad/CVSS/EPSS/remediacion) de UN escaneo
+        # puntual. OJO: si el mismo activo se volvio a escanear despues,
+        # ingest_findings reasigna scan_job_id al escaneo MAS RECIENTE que
+        # toco cada fila (ver ese metodo) -- este filtro muestra el estado
+        # actual de esas vulnerabilidades, que puede no coincidir 1 a 1 con
+        # los hallazgos crudos de un escaneo viejo si hubo un rescan.
+        query = query.where(Vulnerability.scan_job_id == scan_job_id)
     result = await db.execute(query.order_by(Vulnerability.priority_score.desc(), Vulnerability.created_at.desc()))
     return list(result.scalars().all())
 

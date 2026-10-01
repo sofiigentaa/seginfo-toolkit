@@ -68,3 +68,22 @@ def test_by_tactic_aggregation_matches_technique_totals():
     total_from_buckets = sum(bucket["total"] for bucket in result.by_tactic.values())
     assert total_from_buckets == result.total_techniques
     assert sum(bucket["covered"] for bucket in result.by_tactic.values()) == 0
+
+
+def test_build_coverage_none_scope_uses_full_catalog():
+    # None = "sin recorte" (caso de /coverage/overall): usa TODO el catalogo.
+    result = _build_coverage(None, {})
+    assert result.total_techniques == len(ATTACK_TECHNIQUES)
+
+
+def test_build_coverage_truly_empty_scope_reports_zero_not_full_catalog():
+    # Bug real: una lista vacia (ejercicio declarado sin ninguna tecnica)
+    # caia en la misma rama que None y terminaba usando TODO el catalogo
+    # ATT&CK en vez de reportar 0 tecnicas -- ver docstring de
+    # _build_coverage en app/services.py.
+    result = _build_coverage([], {"T1110": ["regla-x"]})
+    assert result.total_techniques == 0
+    assert result.covered_count == 0
+    assert result.coverage_pct == 0.0
+    assert result.techniques == []
+    assert result.gaps == []

@@ -12,6 +12,7 @@ import type {
 } from "../types";
 import PageHeader from "../components/PageHeader";
 import { StatusBadge } from "../components/Badge";
+import { connectionErrorDetail } from "../utils/errors";
 
 export default function Dashboard() {
   const vulnStats = useQuery({
@@ -54,6 +55,23 @@ export default function Dashboard() {
   const criticalAssets = assets.data?.filter((a) => a.criticality === "critical").length ?? 0;
   const scansRunning = scans.data?.filter((s) => s.status === "running" || s.status === "pending").length ?? 0;
 
+  // Servicios que fallaron al cargar -- se muestran como banner arriba y
+  // cada stat-card que dependa de ese servicio cae a "-" en vez de a 0/0
+  // (ver failedServiceLabels mas abajo: mostrar "0 alertas activas" cuando
+  // en realidad siem-service no respondio es peor que mostrar nada, porque
+  // da una falsa sensacion de que todo esta tranquilo).
+  const serviceStatuses: { label: string; query: { isError: boolean; error: unknown } }[] = [
+    { label: "vuln-service", query: vulnStats },
+    { label: "siem-service", query: alerts },
+    { label: "case-service", query: cases },
+    { label: "purple-team-service", query: coverage },
+    { label: "asset-service", query: assets },
+    { label: "scan-service", query: scans },
+    { label: "soar-service", query: playbookRuns },
+    { label: "notification-service", query: notifyLogs },
+  ];
+  const failedServices = serviceStatuses.filter((s) => s.query.isError);
+
   const recentScans = [...(scans.data ?? [])]
     .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
     .slice(0, 5);
@@ -67,6 +85,20 @@ export default function Dashboard() {
   return (
     <div>
       <PageHeader title="Dashboard" subtitle="Vista general del estado de seguridad defensiva" />
+      {failedServices.length > 0 && (
+        <div className="panel">
+          <p className="error-text">
+            No se pudo conectar con {failedServices.length === 1 ? "este servicio" : "estos servicios"}: {failedServices.map((s) => s.label).join(", ")}.
+            Las metricas que dependen de {failedServices.length === 1 ? "el" : "ellos"} muestran "-" en vez de 0 para
+            no confundir "sin datos" con "no responde".
+          </p>
+          {failedServices.map((s) => (
+            <p key={s.label} className="error-text" style={{ marginTop: 4 }}>
+              {s.label}: <span className="error-detail">{connectionErrorDetail(s.query.error)}</span>
+            </p>
+          ))}
+        </div>
+      )}
       <div className="cards-grid">
         <div className="stat-card">
           <span className="stat-label">Vulnerabilidades abiertas</span>
@@ -75,13 +107,13 @@ export default function Dashboard() {
         </div>
         <div className="stat-card">
           <span className="stat-label">Alertas SIEM activas</span>
-          <span className="stat-value">{alerts.isLoading ? "-" : openAlerts}</span>
-          <span className="stat-hint">de {alerts.data?.length ?? 0} totales</span>
+          <span className="stat-value">{alerts.isLoading || alerts.isError ? "-" : openAlerts}</span>
+          <span className="stat-hint">de {alerts.isError ? "-" : alerts.data?.length ?? 0} totales</span>
         </div>
         <div className="stat-card">
           <span className="stat-label">Casos abiertos</span>
-          <span className="stat-value">{cases.isLoading ? "-" : openCases}</span>
-          <span className="stat-hint">{breachedCases} con SLA vencido</span>
+          <span className="stat-value">{cases.isLoading || cases.isError ? "-" : openCases}</span>
+          <span className="stat-hint">{cases.isError ? "-" : breachedCases} con SLA vencido</span>
         </div>
         <div className="stat-card">
           <span className="stat-label">Cobertura ATT&amp;CK</span>
@@ -90,13 +122,13 @@ export default function Dashboard() {
         </div>
         <div className="stat-card">
           <span className="stat-label">Activos inventariados</span>
-          <span className="stat-value">{assets.isLoading ? "-" : assets.data?.length ?? 0}</span>
-          <span className="stat-hint">{criticalAssets} criticos</span>
+          <span className="stat-value">{assets.isLoading || assets.isError ? "-" : assets.data?.length ?? 0}</span>
+          <span className="stat-hint">{assets.isError ? "-" : criticalAssets} criticos</span>
         </div>
         <div className="stat-card">
           <span className="stat-label">Escaneos en curso</span>
-          <span className="stat-value">{scans.isLoading ? "-" : scansRunning}</span>
-          <span className="stat-hint">de {scans.data?.length ?? 0} totales</span>
+          <span className="stat-value">{scans.isLoading || scans.isError ? "-" : scansRunning}</span>
+          <span className="stat-hint">de {scans.isError ? "-" : scans.data?.length ?? 0} totales</span>
         </div>
       </div>
 

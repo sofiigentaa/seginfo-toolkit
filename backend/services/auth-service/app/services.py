@@ -343,7 +343,25 @@ def issue_tokens(user: User, role_name: str) -> tuple[str, str]:
     )
 
 
+def verify_current_totp(user: User, totp_code: str | None) -> bool:
+    """True si totp_code es un codigo TOTP valido para el secret MFA
+    ACTUAL de este usuario (valid_window=1, mismo criterio que
+    authenticate() y confirm_mfa()). Funcion pura (nada de I/O, solo
+    pyotp) -- usada por mfa_enroll para exigir prueba de que quien pide
+    reemplazar el secret todavia controla el dispositivo ya enrolado."""
+    if not user.mfa_secret or not totp_code:
+        return False
+    return pyotp.TOTP(user.mfa_secret).verify(totp_code, valid_window=1)
+
+
 async def enroll_mfa(db: AsyncSession, user: User) -> tuple[str, str]:
+    # OJO: esto pisa user.mfa_secret sin condicion -- si el usuario YA
+    # tiene mfa_enabled=True, quien llama a esta funcion (app/main.py::
+    # mfa_enroll) tiene que haber verificado antes, con
+    # verify_current_totp(), que quien pide el re-enrolamiento controla
+    # el secret ACTUAL. Sin eso, cualquiera con un access_token robado
+    # (no hace falta conocer el TOTP real) podia reemplazar en silencio
+    # el secret de MFA de otro usuario y apropiarse del segundo factor.
     secret = pyotp.random_base32()
     user.mfa_secret = secret
     await db.flush()

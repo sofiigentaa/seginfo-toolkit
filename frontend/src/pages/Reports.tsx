@@ -4,7 +4,7 @@ import { reportApi, notificationApi } from "../services/api";
 import { useAuthStore } from "../store/auth";
 import type { GeneratedReportOut, ReportScheduleOut, ChannelOut } from "../types";
 import PageHeader from "../components/PageHeader";
-import { connectionErrorDetail } from "../utils/errors";
+import { connectionErrorDetail, blobExportErrorDetail } from "../utils/errors";
 
 // Mismo criterio que require_role("admin", "soc_manager") en
 // POST/PATCH/DELETE /report-schedules (report-service/app/main.py) --
@@ -30,30 +30,17 @@ function scheduleWhen(s: ReportScheduleOut): string {
   return `Todos los dias a las ${time}`;
 }
 
-async function downloadCsv(reportId: string) {
+async function downloadExport(reportId: string, format: "csv" | "pdf") {
   const response = await reportApi.get(`/reports/${reportId}/export`, {
-    params: { format: "csv" },
+    params: { format },
     responseType: "blob",
   });
-  const url = window.URL.createObjectURL(new Blob([response.data]));
+  const url = window.URL.createObjectURL(
+    new Blob([response.data], { type: format === "pdf" ? "application/pdf" : "text/csv" }),
+  );
   const link = document.createElement("a");
   link.href = url;
-  link.setAttribute("download", `reporte-${reportId}.csv`);
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  window.URL.revokeObjectURL(url);
-}
-
-async function downloadPdf(reportId: string) {
-  const response = await reportApi.get(`/reports/${reportId}/export`, {
-    params: { format: "pdf" },
-    responseType: "blob",
-  });
-  const url = window.URL.createObjectURL(new Blob([response.data], { type: "application/pdf" }));
-  const link = document.createElement("a");
-  link.href = url;
-  link.setAttribute("download", `reporte-${reportId}.pdf`);
+  link.setAttribute("download", `reporte-${reportId}.${format}`);
   document.body.appendChild(link);
   link.click();
   link.remove();
@@ -98,6 +85,19 @@ export default function Reports() {
   const deleteReport = useMutation({
     mutationFn: async (id: string) => reportApi.delete(`/reports/${id}`),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["reports"] }),
+  });
+
+  // Antes, los botones CSV/PDF llamaban a downloadCsv/downloadPdf
+  // directamente (funciones async sueltas, sin mutation): si la
+  // exportacion fallaba (ej. reportlab tira una excepcion armando el PDF,
+  // o el report-service esta caido) quedaba como una promesa rechazada
+  // sin manejar -- el usuario hacia click en "CSV"/"PDF" y no pasaba
+  // nada, sin ningun mensaje de error.
+  const [exportErrorState, setExportErrorState] = useState<string | null>(null);
+  const exportReport = useMutation({
+    mutationFn: async ({ id, format }: { id: string; format: "csv" | "pdf" }) => downloadExport(id, format),
+    onMutate: () => setExportErrorState(null),
+    onError: async (err) => setExportErrorState(await blobExportErrorDetail(err)),
   });
 
   const createSchedule = useMutation({
@@ -174,9 +174,21 @@ export default function Reports() {
                   <td>{r.errors.length > 0 ? r.errors.join("; ") : "-"}</td>
                   <td>{new Date(r.created_at).toLocaleString()}</td>
                   <td>
-                    <button className="btn-link" onClick={() => downloadCsv(r.id)}>CSV</button>
+                    <button
+                      className="btn-link"
+                      onClick={() => exportReport.mutate({ id: r.id, format: "csv" })}
+                      disabled={exportReport.isPending}
+                    >
+                      CSV
+                    </button>
                     {" / "}
-                    <button className="btn-link" onClick={() => downloadPdf(r.id)}>PDF</button>
+                    <button
+                      className="btn-link"
+                      onClick={() => exportReport.mutate({ id: r.id, format: "pdf" })}
+                      disabled={exportReport.isPending}
+                    >
+                      PDF
+                    </button>
                   </td>
                   <td>
                     <button className="btn-link" onClick={() => deleteReport.mutate(r.id)}>Eliminar</button>
@@ -193,6 +205,12 @@ export default function Reports() {
           <p className="error-text">
             No se pudo eliminar el reporte.{" "}
             <span className="error-detail">{connectionErrorDetail(deleteReport.error)}</span>
+          </p>
+        )}
+        {exportErrorState && (
+          <p className="error-text">
+            No se pudo exportar el reporte.{" "}
+            <span className="error-detail">{exportErrorState}</span>
           </p>
         )}
       </div>

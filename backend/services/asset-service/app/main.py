@@ -114,6 +114,12 @@ async def update_asset(
     claims: dict = Depends(require_role("admin", "soc_manager", "analyst")),
     db: AsyncSession = Depends(get_db),
 ):
+    # is_active tiene el mismo peso que el DELETE de mas abajo (desactivar
+    # un activo), que a proposito requiere un rol mas alto (admin/soc_manager,
+    # sin analyst) -- sin este chequeo, un analyst podia lograr lo mismo
+    # mandando is_active=False por PATCH, esquivando esa restriccion.
+    if payload.is_active is not None and not services.can_set_active_state(claims.get("role")):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Permisos insuficientes para activar/desactivar un activo")
     asset = await services.get_asset(db, asset_id, org_id_from_claims(claims))
     if asset is None:
         raise HTTPException(status_code=404, detail="Activo no encontrado")

@@ -83,6 +83,7 @@ export interface VulnerabilityOut {
   description: string;
   severity: string;
   source_scanner: string;
+  scan_job_id: string | null;
   asset_id: string | null;
   package: string;
   installed_version: string;
@@ -117,6 +118,18 @@ export interface SigmaRuleOut {
   is_enabled: boolean;
 }
 
+export interface ThreatIntelHit {
+  score: number | null;
+  source: string;
+  categories: string[];
+  cached?: boolean;
+}
+
+export interface IpReputationOut extends ThreatIntelHit {
+  ip: string;
+  is_malicious: boolean | null;
+}
+
 export interface AlertOut {
   id: string;
   rule_id: string;
@@ -128,6 +141,7 @@ export interface AlertOut {
   acknowledged_by: string;
   notes: string;
   created_at: string;
+  threat_intel?: Record<string, ThreatIntelHit>;
 }
 
 export interface PlaybookOut {
@@ -327,4 +341,111 @@ export interface SsoConfigOut {
   client_id: string;
   default_role: string;
   enabled: boolean;
+}
+
+export interface MonitoredDomainOut {
+  id: string;
+  domain: string;
+  is_enabled: boolean;
+  created_by: string;
+  created_at: string;
+}
+
+export interface DiscoveredAssetOut {
+  id: string;
+  monitored_domain_id: string;
+  hostname: string;
+  first_seen_at: string;
+  last_seen_at: string;
+  is_active: boolean;
+}
+
+export interface SurfaceAlertOut {
+  id: string;
+  monitored_domain_id: string;
+  alert_type: string;
+  hostname: string;
+  severity: string;
+  detail: string;
+  created_at: string;
+  is_acknowledged: boolean;
+  acknowledged_by: string;
+}
+
+export type CloudProvider = "aws";
+export type CloudResourceType = "ec2_instance" | "security_group" | "s3_bucket";
+export type CloudFindingType = "s3_bucket_public" | "security_group_open_world";
+export type FindingSeverity = "critical" | "high" | "medium";
+
+export interface CloudAccountOut {
+  id: string;
+  name: string;
+  provider: CloudProvider;
+  region: string;
+  access_key_id_masked: string;
+  is_enabled: boolean;
+  last_sync_at: string | null;
+  last_sync_status: "never" | "ok" | "error";
+  last_sync_error: string;
+  created_by: string;
+  created_at: string;
+}
+
+export interface CloudResourceOut {
+  id: string;
+  cloud_account_id: string;
+  resource_type: CloudResourceType;
+  external_id: string;
+  name: string;
+  region: string;
+  resource_metadata: Record<string, unknown>;
+  is_active: boolean;
+  first_seen_at: string;
+  last_seen_at: string;
+}
+
+export interface CloudFindingOut {
+  id: string;
+  cloud_account_id: string;
+  resource_external_id: string;
+  finding_type: CloudFindingType;
+  severity: FindingSeverity;
+  detail: string;
+  created_at: string;
+  is_acknowledged: boolean;
+  acknowledged_by: string;
+}
+
+export type RepoScanStatus = "never" | "ok" | "error";
+export type SecretSeverity = "critical" | "high" | "medium";
+
+export interface RepoTargetOut {
+  id: string;
+  name: string;
+  repo_url: string;
+  branch: string;
+  has_token: boolean;
+  is_enabled: boolean;
+  last_scan_at: string | null;
+  last_scan_status: RepoScanStatus;
+  last_scan_error: string;
+  last_scan_secrets_found: number;
+  last_scan_vulnerabilities_found: number;
+  created_by: string;
+  created_at: string;
+}
+
+export interface SecretFindingOut {
+  id: string;
+  repo_target_id: string;
+  rule_id: string;
+  description: string;
+  file_path: string;
+  start_line: number | null;
+  commit_hash: string;
+  severity: SecretSeverity;
+  match_redacted: string;
+  created_at: string;
+  is_acknowledged: boolean;
+  acknowledged_by: string;
 }

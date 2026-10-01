@@ -130,6 +130,16 @@ class MfaEnrollResponse(BaseModel):
 class MfaVerifyRequest(BaseModel):
     totp_code: str
 
+
+class MfaEnrollRequest(BaseModel):
+    """Body opcional de POST /auth/mfa/enroll. totp_code solo hace falta para
+    RE-enrolar (el usuario YA tiene MFA activo y esta reemplazando el secret,
+    ej. perdio el dispositivo) -- ver el chequeo en app/main.py::mfa_enroll.
+    En el primer enrolamiento (mfa_enabled todavia False) se ignora."""
+
+    totp_code: str | None = None
+
+
 class GoogleAuthRequest(BaseModel):
     credential: str
 

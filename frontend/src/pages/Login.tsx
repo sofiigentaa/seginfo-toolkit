@@ -136,11 +136,18 @@ export default function Login() {
     setLoading(true);
     setError(null);
     setPaymentUrl(null);
+    // BUG (corregido aca): antes esto envolvia register() Y el login()
+    // posterior en el mismo try/catch, asi que si la cuenta se creaba bien
+    // pero el login automatico fallaba (ej. 402 porque la organizacion
+    // "default" no tiene la suscripcion al dia), el usuario veia "No se
+    // pudo crear la cuenta" -- un mensaje falso, la cuenta SI se creo -- y
+    // nunca se le mostraba el link de pago (a diferencia del login manual,
+    // que si usa parseLoginError/paymentUrl). Ahora cada paso tiene su
+    // propio catch: uno para el registro en si, y otro (con la misma
+    // logica de 402 que el login normal) para el login automatico que le
+    // sigue.
     try {
       await register(email, password, fullName);
-      const tokens = await login(email, password);
-      setTokens(tokens.access_token, tokens.refresh_token);
-      navigate("/");
     } catch (err) {
       const axiosErr = err as { response?: { data?: { detail?: unknown } } };
       const detail = axiosErr?.response?.data?.detail;
@@ -149,6 +156,18 @@ export default function Login() {
           ? detail
           : "No se pudo crear la cuenta. Revisa que el email no este ya registrado y que la contrasena tenga al menos 12 caracteres.",
       );
+      setLoading(false);
+      return;
+    }
+    try {
+      const tokens = await login(email, password);
+      setTokens(tokens.access_token, tokens.refresh_token);
+      navigate("/");
+    } catch (err) {
+      // La cuenta ya se creo con exito en este punto -- este error es del
+      // login automatico que le sigue (ej. 402 de organizacion sin
+      // suscripcion al dia), no del registro.
+      applyLoginError(err, "La cuenta se creo, pero no se pudo iniciar sesion automaticamente. Ingresa con tu email y contrasena.");
     } finally {
       setLoading(false);
     }

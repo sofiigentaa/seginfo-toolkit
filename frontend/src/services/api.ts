@@ -95,6 +95,10 @@ export const purpleApi = makeClient(serviceUrl("VITE_PURPLE_API_BASE_URL", 8008)
 export const reportApi = makeClient(serviceUrl("VITE_REPORT_API_BASE_URL", 8009));
 export const notificationApi = makeClient(serviceUrl("VITE_NOTIFICATION_API_BASE_URL", 8010));
 export const integrationApi = makeClient(serviceUrl("VITE_INTEGRATION_API_BASE_URL", 8011));
+export const threatIntelApi = makeClient(serviceUrl("VITE_THREATINTEL_API_BASE_URL", 8012));
+export const asmApi = makeClient(serviceUrl("VITE_ASM_API_BASE_URL", 8013));
+export const cloudApi = makeClient(serviceUrl("VITE_CLOUD_API_BASE_URL", 8014));
+export const coderepoApi = makeClient(serviceUrl("VITE_CODEREPO_API_BASE_URL", 8015));
 
 export interface TokenPair {
   access_token: string;

@@ -39,6 +39,18 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             f"UPDATE alerts SET organization_id = '{DEFAULT_ORGANIZATION_ID}' WHERE organization_id IS NULL"
         ))
+        # Migracion para instalaciones existentes -- mismo patron que
+        # organization_id arriba: create_all no altera una tabla que ya
+        # existia antes de esta version. threat_intel default 'null'::json
+        # a nivel SQL no es lo mismo que el default={} de la app (JSON
+        # NULL en la columna, no un objeto vacio), asi que las filas viejas
+        # se backfillean explicitamente a '{}' para que el frontend
+        # (que chequea Object.keys(alert.threat_intel).length) nunca vea
+        # null.
+        await conn.execute(text("ALTER TABLE alerts ADD COLUMN IF NOT EXISTS threat_intel JSON"))
+        await conn.execute(text(
+            "UPDATE alerts SET threat_intel = '{}' WHERE threat_intel IS NULL"
+        ))
     try:
         await opensearch_client.ensure_index(os_client)
     except Exception as exc:  # OpenSearch puede no estar arriba todavia en dev

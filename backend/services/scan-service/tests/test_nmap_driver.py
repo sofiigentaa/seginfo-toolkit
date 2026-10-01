@@ -1,7 +1,7 @@
 """Tests para app/scanners/nmap.py::_parse_nmap_xml (normalizacion de la
 salida XML de nmap a findings), sin ejecutar nmap de verdad -- se le pasa
 un XML de ejemplo tal como lo devolveria `nmap -oX -`."""
-from app.scanners.nmap import _ALLOWED_EXTRA_FLAGS, _parse_nmap_xml
+from app.scanners.nmap import _ALLOWED_EXTRA_FLAGS, _build_nmap_cmd, _parse_nmap_xml
 
 _SAMPLE_XML = """<?xml version="1.0"?>
 <nmaprun>
@@ -71,3 +71,36 @@ def test_allowed_extra_flags_excludes_exploitation_related_flags():
     # fallar y llamar la atencion sobre ese cambio.
     assert _ALLOWED_EXTRA_FLAGS == {"-p", "-Pn", "-6", "--top-ports"}
     assert "--script" not in _ALLOWED_EXTRA_FLAGS
+
+
+def test_build_cmd_full_mode_default_keeps_historic_behavior():
+    cmd, timeout, mode = _build_nmap_cmd("10.0.0.5", {})
+    assert mode == "full"
+    assert cmd == ["nmap", "-T4", "--host-timeout", "30s", "-sV", "-sC", "--script", "default,safe", "-oX", "-", "10.0.0.5"]
+    assert timeout == 180
+
+
+def test_build_cmd_fast_mode_drops_scripts_and_shrinks_ports():
+    cmd, timeout, mode = _build_nmap_cmd("10.0.0.5", {"mode": "fast"})
+    assert mode == "fast"
+    assert "-sC" not in cmd
+    assert "--script" not in cmd
+    assert "--top-ports" in cmd and "100" in cmd
+    assert timeout == 60
+
+
+def test_build_cmd_fast_mode_with_explicit_ports_skips_top_ports():
+    cmd, _, _ = _build_nmap_cmd("10.0.0.5", {"mode": "fast", "ports": "22,80,443"})
+    assert "--top-ports" not in cmd
+    assert "-p" in cmd and "22,80,443" in cmd
+
+
+def test_build_cmd_unknown_mode_falls_back_to_full():
+    _, timeout, mode = _build_nmap_cmd("10.0.0.5", {"mode": "bogus"})
+    assert mode == "full"
+    assert timeout == 180
+
+
+def test_build_cmd_full_mode_with_explicit_ports():
+    cmd, _, _ = _build_nmap_cmd("10.0.0.5", {"ports": "1-1024"})
+    assert "-p" in cmd and "1-1024" in cmd

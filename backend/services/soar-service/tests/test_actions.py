@@ -57,12 +57,26 @@ class TestResolveField:
 
 
 class TestActionRegistry:
-    def test_known_actions_are_registered(self):
-        assert set(ACTIONS.keys()) >= {"block_ip", "isolate_host", "create_case"}
+    # Bug real corregido: app/actions/__init__.py (el ACTIONS/get_action que
+    # este test ejercita) estaba desincronizado del ACTIONS que de verdad
+    # usaba el motor de ejecucion en app/services.py -- a este le faltaban
+    # 'create_ticket' y 'notify'. Ahora services.py importa este mismo
+    # registro, asi que una igualdad estricta (no solo >=) es la garantia de
+    # que las 5 acciones declaradas en playbooks/*.yaml siempre se puedan
+    # ejecutar.
+    def test_all_five_defensive_actions_are_registered(self):
+        assert set(ACTIONS.keys()) == {
+            "block_ip", "isolate_host", "create_case", "create_ticket", "notify",
+        }
 
     def test_get_action_returns_matching_executor(self):
         action = get_action("block_ip")
         assert action.action_name == "block_ip"
+
+    def test_get_action_resolves_create_ticket_and_notify(self):
+        # Estas dos son justamente las que faltaban antes del fix.
+        assert get_action("create_ticket").action_name == "create_ticket"
+        assert get_action("notify").action_name == "notify"
 
     def test_get_action_raises_for_unknown_name(self):
         with pytest.raises(KeyError):
