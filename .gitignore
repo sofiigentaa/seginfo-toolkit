@@ -10,3 +10,4 @@ dist/
 backend/.venv/
 vite.config.ts.timestamp-*.mjs
 backend/services/boton-service/venv/
+backend/services/boton-service/salidas/
