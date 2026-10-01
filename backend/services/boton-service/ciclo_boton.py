@@ -2,6 +2,7 @@ from detector_patrones import cargar_eventos, descubrir_secuencias
 from detector_necesidades import evaluar_necesidad
 from autonomia import decidir_autonomia
 from generador_microsistemas import construir_microsistema, mostrar_microsistema
+from ejecutor_microsistemas import ejecutar_microsistema
 
 
 def evaluar_riesgo(acciones_delegables):
@@ -71,7 +72,15 @@ def main():
             if microsistema:
                 print("BOTON decidio actuar y construyo una solucion compatible.")
                 mostrar_microsistema(microsistema)
-                print("Siguiente etapa: ejecutar y verificar el resultado.")
+                resultado = ejecutar_microsistema(microsistema)
+                print("Resultado de ejecucion:")
+                print(f"  Estado: {resultado['estado']}")
+                print(f"  Verificado: {resultado['verificado']}")
+                print(f"  Detalle: {resultado['detalle']}")
+                if resultado["verificado"]:
+                    print("Feedback: resultado correcto; BOTON puede registrar esta ejecucion como exitosa.")
+                else:
+                    print("Feedback: resultado incorrecto; BOTON no debe repetir la accion sin corregirla.")
             else:
                 print("BOTON decidio actuar, pero aun no dispone de una solucion compatible.")
         else:
